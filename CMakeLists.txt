@@ -70,6 +70,8 @@ if(WIN32)
         server/document_converter.h
         server/watermark_service.cpp
         server/watermark_service.h
+        server/db_manager.cpp
+        server/db_manager.h
         server/ui/main_window.cpp
         server/ui/main_window.h
         server/ui/settings_dialog.cpp
@@ -105,6 +107,8 @@ else()
         server/document_converter.h
         server/watermark_service.cpp
         server/watermark_service.h
+        server/db_manager.cpp
+        server/db_manager.h
         server/ui/main_window.cpp
         server/ui/main_window.h
         server/ui/settings_dialog.cpp
@@ -221,7 +225,24 @@ if(WIN32)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_SOURCE_DIR}/server/word_to_pdf.py"
             "$<TARGET_FILE_DIR:CrossNetShareServer>/word_to_pdf.py"
-        COMMENT "Copying Aspose.Words Python converter script..."
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/server/db_query.py"
+            "$<TARGET_FILE_DIR:CrossNetShareServer>/db_query.py"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/server/fill_template.py"
+            "$<TARGET_FILE_DIR:CrossNetShareServer>/fill_template.py"
+        COMMENT "Copying Python scripts (word_to_pdf, db_query, fill_template)..."
+    )
+    
+    # 复制批办单模板和 H2 数据库 jar
+    add_custom_command(TARGET CrossNetShareServer POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/模板.docx"
+            "$<TARGET_FILE_DIR:CrossNetShareServer>/模板.docx"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/h2.jar"
+            "$<TARGET_FILE_DIR:CrossNetShareServer>/h2.jar"
+        COMMENT "Copying approval template and H2 jar..."
     )
     
     # 复制客户端文本提取脚本

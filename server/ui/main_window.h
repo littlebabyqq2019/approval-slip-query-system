@@ -12,6 +12,7 @@
 #include <QTimer>
 #include <QSystemTrayIcon>
 #include <QMenu>
+#include <QFileDialog>
 
 namespace CrossNetShare {
 
@@ -33,6 +34,8 @@ protected:
 private slots:
     void onStartStopClicked();
     void onRefreshIndexClicked();
+    void onSelectDatabaseClicked();
+    void onRefreshDbClicked();
     void onServerStarted();
     void onServerStopped();
     void onClientConnected(const QString& clientId, const QString& address);
@@ -44,6 +47,8 @@ private slots:
     void onTrayIconActivated(QSystemTrayIcon::ActivationReason reason);
     void onShowWindow();
     void onQuitApp();
+    void onDbManagerError(const QString& msg);
+    void onDbDatabaseChanged();
 
 private:
     void setupUi();
@@ -60,6 +65,10 @@ private:
     QSpinBox* webPortSpinBox_;
     QPushButton* startStopButton_;
     QPushButton* refreshButton_;
+    QPushButton* selectDbButton_;
+    QPushButton* refreshDbButton_;
+    QLineEdit* dbPathLineEdit_;
+    QLabel* dbStatusLabel_;
     QLabel* statusLabel_;
     QListWidget* clientListWidget_;
     QTextEdit* logTextEdit_;

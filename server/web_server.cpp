@@ -6,6 +6,7 @@
 #include "document_converter.h"
 #include "watermark_service.h"
 #include "file_indexer.h"
+#include "db_manager.h"
 #include "audit_logger.h"
 #include "common/protocol.h"
 #include "common/version.h"
@@ -425,6 +426,50 @@ void WebServer::handleFileList(QTcpSocket* socket, const HttpRequest& request) {
         return;
     }
 
+    // ===== 批办单模式：如果数据库已加载，从数据库读取记录 =====
+    if (DbManager::instance()->isDatabaseLoaded()) {
+        QList<ApprovalRecord> records = DbManager::instance()->getAllRecords();
+        nlohmann::json root;
+        root["success"] = true;
+        root["mode"] = "approval";  // 批办单模式标识（前端据此调整展示）
+        root["files"] = nlohmann::json::array();
+        for (const auto& r : records) {
+            nlohmann::json item;
+            // 主键：直接使用数据库ID（批办单模式，前端id不再是 clientId|path）
+            item["id"] = r.id.toStdString();
+            item["mode"] = "approval";
+            // 左侧列表只显示收文编号 A-26-1 作为名称
+            item["filename"] = r.receiveNumber.toStdString();
+            item["receiveNumber"] = r.receiveNumber.toStdString();
+            item["wordCode"] = r.wordCode.toStdString();
+            item["summary"] = r.summary.toStdString();
+            item["department"] = r.department.toStdString();
+            item["fileCategory"] = r.fileCategory.toStdString();
+            item["receiveChannel"] = r.receiveChannel.toStdString();
+            item["fileReceiveDate"] = r.fileReceiveDate.toStdString();
+            item["emergencyLevel"] = r.emergencyLevel.toStdString();
+            item["secretLevel"] = r.secretLevel.toStdString();
+            item["leaderInstruction"] = r.leaderInstruction.toStdString();
+            item["suggestion"] = r.suggestion.toStdString();
+            item["processResult"] = r.processResult.toStdString();
+            // 兼容旧字段：size / humanSize / previewSupported / ownerClient / relativePath
+            item["ownerClient"] = "server";      // 表示服务端直接提供（非客户端文件）
+            item["relativePath"] = r.receiveNumber.toStdString();
+            item["createTime"] = r.createTime.toStdString();
+            item["modifyTime"] = r.modifyTime.toStdString();
+            item["size"] = 0;
+            item["humanSize"] = "";
+            item["previewSupported"] = true;
+            root["files"].push_back(item);
+        }
+        HttpResponse response;
+        response.headers["Content-Type"] = "application/json; charset=utf-8";
+        response.body = jsonResponse(root);
+        sendResponse(socket, response);
+        return;
+    }
+
+    // ===== 原有模式：从 FileIndexer 获取客户端文件 =====
     std::vector<FileMetadata> files = indexer_->getAllFiles();
 
     nlohmann::json root;
@@ -447,6 +492,58 @@ void WebServer::handleFileList(QTcpSocket* socket, const HttpRequest& request) {
 
 void WebServer::handleFileSearch(QTcpSocket* socket, const HttpRequest& request) {
     QString keyword = request.params.value("q").trimmed();
+
+    // ===== 批办单模式：在数据库里搜索 =====
+    if (DbManager::instance()->isDatabaseLoaded()) {
+        QString username;
+        if (!isAuthenticated(request, username)) {
+            HttpResponse response;
+            response.statusCode = 401;
+            response.statusText = "Unauthorized";
+            response.body = jsonResponse({{"success", false}, {"error", "未登录"}});
+            sendResponse(socket, response);
+            return;
+        }
+        QList<ApprovalRecord> records;
+        if (keyword.isEmpty()) {
+            records = DbManager::instance()->getAllRecords();
+        } else {
+            records = DbManager::instance()->searchRecords(keyword);
+        }
+        nlohmann::json root;
+        root["success"] = true;
+        root["mode"] = "approval";
+        root["files"] = nlohmann::json::array();
+        for (const auto& r : records) {
+            nlohmann::json item;
+            item["id"] = r.id.toStdString();
+            item["mode"] = "approval";
+            item["filename"] = r.receiveNumber.toStdString();
+            item["receiveNumber"] = r.receiveNumber.toStdString();
+            item["wordCode"] = r.wordCode.toStdString();
+            item["summary"] = r.summary.toStdString();
+            item["department"] = r.department.toStdString();
+            item["fileCategory"] = r.fileCategory.toStdString();
+            item["receiveChannel"] = r.receiveChannel.toStdString();
+            item["fileReceiveDate"] = r.fileReceiveDate.toStdString();
+            item["secretLevel"] = r.secretLevel.toStdString();
+            item["ownerClient"] = "server";
+            item["relativePath"] = r.receiveNumber.toStdString();
+            item["createTime"] = r.createTime.toStdString();
+            item["modifyTime"] = r.modifyTime.toStdString();
+            item["size"] = 0;
+            item["humanSize"] = "";
+            item["previewSupported"] = true;
+            root["files"].push_back(item);
+        }
+        HttpResponse response;
+        response.headers["Content-Type"] = "application/json; charset=utf-8";
+        response.body = jsonResponse(root);
+        sendResponse(socket, response);
+        return;
+    }
+
+    // ===== 原有模式 =====
     std::vector<FileMetadata> files = indexer_->getAllFiles();
 
     nlohmann::json root;
@@ -489,6 +586,58 @@ void WebServer::handleFileDownload(QTcpSocket* socket, const HttpRequest& reques
         response.statusText = "Forbidden";
         response.headers["Content-Type"] = "application/json; charset=utf-8";
         response.body = jsonResponse({{"success", false}, {"error", "无权限下载文件"}});
+        sendResponse(socket, response);
+        return;
+    }
+
+    // ===== 批办单模式：id 是数据库主键，生成 Word+PDF 后返回 =====
+    QString idParam = request.params.value("id").trimmed();
+    QString formatParam = request.params.value("format").trimmed().toLower();
+    if (DbManager::instance()->isDatabaseLoaded() && !idParam.contains('|')) {
+        ApprovalRecord record;
+        if (!DbManager::instance()->getRecordById(idParam, record)) {
+            HttpResponse response;
+            response.statusCode = 404;
+            response.statusText = "Not Found";
+            response.headers["Content-Type"] = "application/json; charset=utf-8";
+            response.body = jsonResponse({{"success", false}, {"error", "找不到该批办单记录"}});
+            sendResponse(socket, response);
+            return;
+        }
+        QString templatePath;
+        QString errMsg;
+        QString outDocx, outPdf;
+        QString generated = DbManager::instance()->generateDocument(record, templatePath, outDocx, outPdf, errMsg);
+        if (generated.isEmpty()) {
+            HttpResponse response;
+            response.statusCode = 500;
+            response.statusText = "Internal Server Error";
+            response.headers["Content-Type"] = "application/json; charset=utf-8";
+            response.body = jsonResponse({{"success", false}, {"error", "生成文档失败: " + errMsg.toStdString()}});
+            sendResponse(socket, response);
+            return;
+        }
+        AuditLogger::instance()->log(username, AuditAction::DownloadFile,
+                                     record.receiveNumber, socket->peerAddress().toString(), true);
+        // 默认返回 DOCX，format=pdf 时返回 PDF
+        QString servePath = (formatParam == "pdf") ? outPdf : outDocx;
+        QString serveName = (formatParam == "pdf")
+                            ? record.receiveNumber + ".pdf"
+                            : record.receiveNumber + ".docx";
+        QFile f(servePath);
+        if (!f.open(QIODevice::ReadOnly)) {
+            HttpResponse response;
+            response.statusCode = 500;
+            response.statusText = "Internal Server Error";
+            response.body = "无法读取生成的文档文件";
+            sendResponse(socket, response);
+            return;
+        }
+        HttpResponse response;
+        response.headers["Content-Type"] = (formatParam == "pdf") ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        response.headers["Content-Disposition"] = "attachment; filename*=UTF-8''" + QString::fromLatin1(QUrl::toPercentEncoding(serveName));
+        response.body = f.readAll();
+        f.close();
         sendResponse(socket, response);
         return;
     }
@@ -595,6 +744,36 @@ void WebServer::handleBatchDownload(QTcpSocket* socket, const HttpRequest& reque
         return;
     }
 
+    // ===== 批办单模式：ids 是数据库主键列表，生成 Word+PDF 后打包 =====
+    QString formatParam = request.params.value("format").trimmed().toLower();
+    if (DbManager::instance()->isDatabaseLoaded() && !ids.first().contains('|')) {
+        QList<FileInfo> filePaths;
+        for (const QString& id : ids) {
+            ApprovalRecord record;
+            if (!DbManager::instance()->getRecordById(id, record)) continue;
+            QString templatePath, errMsg, outDocx, outPdf;
+            QString generated = DbManager::instance()->generateDocument(record, templatePath, outDocx, outPdf, errMsg);
+            if (generated.isEmpty()) continue;
+            AuditLogger::instance()->log(username, AuditAction::DownloadFile,
+                                         record.receiveNumber, socket->peerAddress().toString(), true);
+            QString servePath = (formatParam == "pdf") ? outPdf : outDocx;
+            QString serveName = (formatParam == "pdf")
+                                ? record.receiveNumber + ".pdf"
+                                : record.receiveNumber + ".docx";
+            filePaths.append({servePath, serveName});
+        }
+        if (filePaths.isEmpty()) {
+            HttpResponse response;
+            response.statusCode = 404;
+            response.statusText = "Not Found";
+            response.body = "No documents could be generated";
+            sendResponse(socket, response);
+            return;
+        }
+        processBatchDownloadFiles(socket, filePaths);
+        return;
+    }
+
     // 使用异步方式收集所有文件
     auto filePaths = std::make_shared<QList<FileInfo>>();
     auto pendingCount = std::make_shared<int>(0);
@@ -696,9 +875,120 @@ void WebServer::handleFilePreview(QTcpSocket* socket, const HttpRequest& request
         return;
     }
 
+    QString id = request.params.value("id").trimmed();
+
+    // ===== 批办单模式：id 是纯数字的数据库主键（不含 '|'）=====
+    if (DbManager::instance()->isDatabaseLoaded() && !id.contains('|')) {
+        ApprovalRecord record;
+        if (!DbManager::instance()->getRecordById(id, record)) {
+            HttpResponse response;
+            response.statusCode = 404;
+            response.headers["Content-Type"] = "text/html; charset=utf-8";
+            response.body = "<div class=\"empty\">找不到该批办单记录</div>";
+            sendResponse(socket, response);
+            return;
+        }
+        // 记录审计
+        AuditLogger::instance()->log(username, AuditAction::PreviewFile,
+                                     record.receiveNumber, socket->peerAddress().toString(), true);
+        // 生成HTML表格（仿模板.docx的10行12列表格）
+        auto H = [](const QString& s) { return s.toHtmlEscaped(); };
+        QString html = QString(
+R"HTML(<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><style>
+body{font-family:SimSun,'宋体',serif;background:white;margin:0;padding:24px;color:#000}
+.wrap{max-width:900px;margin:0 auto}
+.title{text-align:center;font-size:24px;font-weight:bold;margin-bottom:8px;letter-spacing:8px}
+.subtitle{text-align:center;font-size:14px;color:#333;margin-bottom:16px}
+table{width:100%;border-collapse:collapse;font-size:14px;table-layout:fixed}
+td{border:1px solid #000;padding:8px 10px;vertical-align:middle;min-height:34px;line-height:1.5;word-wrap:break-word}
+td.label{background:#f9fafb;font-weight:normal;text-align:center;white-space:nowrap;color:#000}
+td.label-thin{background:#f9fafb;font-weight:normal;text-align:center;color:#000}
+.multi-row-label{writing-mode:vertical-rl;letter-spacing:6px;text-align:center}
+.footer{margin-top:20px;font-size:13px;color:#333;line-height:1.6}
+@media print { body { padding: 0; } }
+</style></head><body><div class="wrap">
+<div class="title">收 文 处 理 笺</div>
+<div class="subtitle">（文件批办单）</div>
+<table>
+  <tr>
+    <td class="label" colspan="2" rowspan="1">来文单位</td>
+    <td colspan="10">%1</td>
+  </tr>
+  <tr>
+    <td class="label" colspan="2">来文字号</td>
+    <td colspan="4">%2</td>
+    <td class="label" colspan="2">收文日期</td>
+    <td colspan="4">%3</td>
+  </tr>
+  <tr>
+    <td class="label" colspan="2">来文类型</td>
+    <td colspan="4">%4</td>
+    <td class="label" colspan="2">收文途径</td>
+    <td colspan="4">%5</td>
+  </tr>
+  <tr>
+    <td class="label-thin">紧急程度</td>
+    <td class="label-thin" colspan="1">%6</td>
+    <td class="label-thin">密&nbsp;&nbsp;级</td>
+    <td colspan="2">%7</td>
+    <td colspan="3" class="label">收文编号</td>
+    <td colspan="4"><strong style="color:#b91c1c;font-size:15px">%8</strong></td>
+  </tr>
+  <tr>
+    <td class="label" rowspan="1" colspan="1">文件标题</td>
+    <td colspan="11" style="min-height:56px">%9</td>
+  </tr>
+  <tr>
+    <td class="label" rowspan="1" colspan="1">领导批示</td>
+    <td colspan="11" style="min-height:56px">%10</td>
+  </tr>
+  <tr>
+    <td class="label" rowspan="1" colspan="1">拟办意见</td>
+    <td colspan="11" style="min-height:64px">%11</td>
+  </tr>
+  <tr>
+    <td class="label" rowspan="2" style="width:40px"><span class="multi-row-label">传&nbsp;阅</span></td>
+    <td class="label-thin" colspan="1">姓&nbsp;名</td>
+    <td colspan="10" style="min-height:48px"></td>
+  </tr>
+  <tr>
+    <td class="label-thin" colspan="1">日&nbsp;期</td>
+    <td colspan="10" style="min-height:48px"></td>
+  </tr>
+  <tr>
+    <td class="label" colspan="1">办理结果</td>
+    <td colspan="11" style="min-height:56px">%12</td>
+  </tr>
+</table>
+<div class="footer">备&nbsp;&nbsp;&nbsp;&nbsp;注：%13</div>
+</div></body></html>)HTML")
+            .arg(H(record.department),
+                 H(record.wordCode),
+                 H(record.fileReceiveDate),
+                 H(record.fileCategory),
+                 H(record.receiveChannel),
+                 H(record.emergencyLevel),
+                 H(record.secretLevel),
+                 H(record.receiveNumber),
+                 H(record.summary),
+                 H(record.leaderInstruction),
+                 H(record.suggestion),
+                 H(record.processResult),
+                 H(record.notes));
+
+        HttpResponse response;
+        response.statusCode = 200;
+        response.statusText = "OK";
+        response.headers["Content-Type"] = "text/html; charset=utf-8";
+        response.body = html.toUtf8();
+        sendResponse(socket, response);
+        return;
+    }
+
+    // ===== 原有模式：从远程客户端获取预览 =====
     QString clientId;
     QString relativePath;
-    if (!parseFileId(request.params.value("id"), clientId, relativePath)) {
+    if (!parseFileId(id, clientId, relativePath)) {
         HttpResponse response;
         response.statusCode = 400;
         response.statusText = "Bad Request";
@@ -729,18 +1019,8 @@ void WebServer::handleFilePreview(QTcpSocket* socket, const HttpRequest& request
     QString relativePathCapture = relativePath;
 
     handler->requestFileAsync(relativePath, [this, socketPtr, relativePathCapture](const ClientHandler::FileRequestResult& result) {
-        // 检查 socket 是否仍然有效
-        if (!socketPtr) {
-            return;  // Socket 已断开，不发送响应
-        }
-
+        if (!socketPtr) return;
         if (result.success) {
-            // 将文件数据写入临时文件用于预览。
-            // 临时文件名只保留原始扩展名，不带原始文件名——原始名可能含有
-            // Word 的 ExportAsFixedFormat 在导出时会解引用崩溃的字符
-            // （比如 '#'、中文字符组合，实测导致 0xC0000005 硬件级异常）。
-            // DocumentConverter::previewFile() 只根据扩展名判断文件类型，
-            // 所以只需要保留扩展名即可。
             QString uniqueId = QDateTime::currentDateTime().toString("yyyyMMddHHmmsszzz");
             QString suffix = QFileInfo(relativePathCapture).suffix();
             QString tempPath = QDir::temp().filePath(
@@ -761,15 +1041,11 @@ void WebServer::handleFilePreview(QTcpSocket* socket, const HttpRequest& request
                     response.headers["Content-Type"] = preview.mimeType;
                     response.body = preview.data;
                 }
-
-                // 清理临时文件
                 QFile::remove(tempPath);
                 sendResponse(socketPtr, response);
                 return;
             }
         }
-
-        // 获取失败
         HttpResponse response;
         response.statusCode = 500;
         response.statusText = "Internal Server Error";
@@ -778,6 +1054,7 @@ void WebServer::handleFilePreview(QTcpSocket* socket, const HttpRequest& request
         sendResponse(socketPtr, response);
     }, 60000);
 }
+
 
 void WebServer::serveStaticFile(QTcpSocket* socket, const QString& path) {
     Q_UNUSED(path)
@@ -803,7 +1080,22 @@ document.addEventListener('keydown',ev=>{if(ev.key==='Enter')login()});
 
 void WebServer::serveBrowsePage(QTcpSocket* socket) {
     static const char* htmlTemplate = R"HTML(
-<!doctype html><html lang="zh-CN"><head> <meta charset="utf-8"> <meta name="viewport" content="width=device-width,initial-scale=1"> <title>CrossNetShare Web</title> <style> body{font-family:Segoe UI,Microsoft YaHei,sans-serif;margin:0;color:#101828;background:#f6f8fb} .top{height:64px;background:#1d3557;color:white;display:flex;align-items:center;gap:16px;padding:0 22px} .top h1{font-size:20px;margin:0} .search{flex:1;max-width:800px;display:flex;gap:8px;align-items:center} .search input{width:100%;border:0;border-radius:8px;padding:10px} .search button{border:0;border-radius:8px;padding:10px 16px;cursor:pointer;background:#10b981;color:white;font-size:14px;white-space:nowrap} .search button:disabled{opacity:0.5;cursor:not-allowed} .date-filter{display:flex;gap:8px;align-items:center;color:white;font-size:14px} .date-filter input[type="date"]{border:0;border-radius:6px;padding:6px;color:#111827} .top-actions{margin-left:auto;display:flex;gap:8px;align-items:center} .btn{border:0;border-radius:8px;padding:10px 14px;cursor:pointer;background:#2563eb;color:white;text-decoration:none;font-size:14px;white-space:nowrap} .btn.secondary{background:#e5e7eb;color:#111827} .btn:disabled{opacity:0.5;cursor:not-allowed} .layout{display:flex;height:calc(100vh - 64px)} .list{width:420px;min-width:200px;max-width:800px;border-right:1px solid #e4e7ec;background:white;overflow:auto} .list-header{padding:10px 14px;border-bottom:2px solid #e4e7ec;background:#f9fafb;display:flex;gap:8px;align-items:center} .client-filter{padding:10px 14px;border-bottom:1px solid #e4e7ec;background:white} .client-filter select{width:100%;border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:14px;color:#111827;background:white} .item{padding:12px 14px;border-bottom:1px solid #eef2f7;cursor:pointer;display:flex;gap:10px;align-items:start} .item:hover{background:#eff6ff} .item.active{background:#dbeafe} .item input[type="checkbox"]{margin-top:4px;width:16px;height:16px;cursor:pointer} .item-content{flex:1;min-width:0} .name{font-weight:600} .meta{font-size:12px;color:#667085;margin-top:4px} .badge{display:inline-block;background:#10b981;color:white;padding:2px 6px;border-radius:4px;font-size:11px;margin-left:6px} .preview{flex:1;display:flex;flex-direction:column;min-width:0;max-height:calc(100vh - 64px);overflow:hidden} .toolbar{background:white;border-bottom:1px solid #e4e7ec;padding:10px;display:flex;gap:8px;align-items:center;overflow-x:auto;flex-shrink:0} .frame{border:0;background:white;margin:16px;border-radius:10px;box-shadow:0 1px 3px #0000001a;width:100%;height:100%;flex:1;min-height:0} .empty{padding:40px;color:#667085;text-align:center} .text-preview{white-space:pre-wrap;padding:20px} .count{color:#667085;font-size:13px} .resizer{width:5px;cursor:col-resize;background:#f3f4f6;flex-shrink:0} .resizer:hover{background:#d1d5db} </style></head><body> <div class="top"> <h1>CrossNetShare Web {{VERSION}}</h1> <div class="search"> <input id="q" placeholder="文件名过滤 / 按回车全文搜索"> <button id="contentSearchBtn" onclick="doContentSearch()">全文搜索</button> </div> <div class="date-filter"> <label>日期筛选:</label> <input type="date" id="dateFrom" style="width:150px"> <button id="selectByDateBtn" class="btn" onclick="selectByDate()">选择</button> <button id="clearDateBtn" class="btn secondary" onclick="clearDateFilter()">清除</button> </div> <div class="top-actions"> <button class="btn" onclick="downloadSelected()" id="batchDownloadBtn" disabled>批量下载</button> <a class="btn secondary" href="/api/logout">退出</a> </div> </div> <div class="layout"> <div class="list" id="fileList"> <div class="client-filter"> <select id="clientFilter" onchange="render()"> <option value="">全部客户端</option> </select> </div> <div class="list-header"> <input type="checkbox" id="selectAll" onchange="toggleSelectAll()"> <label for="selectAll" style="flex:1;cursor:pointer">全选 / 全不选</label> <span id="count" class="count"></span> </div> <div id="list"> <div class="empty">正在加载...</div> </div> </div> <div class="resizer" id="resizer"></div> <div class="preview"> <div class="toolbar"> <strong id="title" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">请选择文件</strong> <button id="watermarkBtn" class="btn secondary" style="display:none" onclick="generateWatermark()">添加水印导出</button> <button id="download" class="btn" style="display:none" onclick="downloadFile()">下载</button> <button id="printBtn" class="btn secondary" style="display:none" onclick="printPreview()">打印</button> </div> <iframe id="frame" class="frame" srcdoc="<div class='empty'>选择左侧文件后在这里预览</div>"></iframe> </div> </div> <script> let files = [], selected = null, userPermissions = {}, watermarkEnabled = false, selectedIds = new Set(), contentSearchResults = [], isContentSearchMode = false; async function loadFiles() { const r = await fetch('/api/files'); if (r.status === 401) { location.href = '/login'; return; } const j = await r.json(); files = j.files || []; files.sort((a, b) => new Date(b.createTime).getTime() - new Date(a.createTime).getTime()); updateClientFilter(); render(); } function updateClientFilter() { const clients = [...new Set(files.map(f => f.ownerClient))].sort(); const select = document.getElementById('clientFilter'); const currentValue = select.value; select.innerHTML = '<option value="">全部客户端</option>'; for (const client of clients) { const option = document.createElement('option'); option.value = client; option.textContent = client; select.appendChild(option); } select.value = currentValue; } async function doContentSearch() { const query = document.getElementById('q').value.trim(); if (!query) { alert('请输入搜索关键词'); return; } const btn = document.getElementById('contentSearchBtn'); btn.disabled = true; btn.textContent = '搜索中...'; try { const r = await fetch('/api/content-search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: query }) }); if (r.status === 401) { location.href = '/login'; return; } const j = await r.json(); if (j.success) { contentSearchResults = j.results || []; isContentSearchMode = true; render(); } else { alert('搜索失败: ' + (j.error || '未知错误')); } } catch (e) { alert('搜索失败: ' + e.message); } finally { btn.disabled = false; btn.textContent = '全文搜索'; } } function render() { const query = document.getElementById('q').value.trim().toLowerCase(); const selectedClient = document.getElementById('clientFilter').value; let displayFiles = []; let countText = ''; if (isContentSearchMode && contentSearchResults.length > 0) { displayFiles = contentSearchResults.map(r => ({ id: r.ownerClient + '|' + r.relativePath, filename: r.filename, relativePath: r.relativePath, ownerClient: r.ownerClient, size: r.size, humanSize: '', modifyTime: r.modifyTime, createTime: '', isContentMatch: true })); const filtered = displayFiles.filter(f => { const matchClient = !selectedClient || f.ownerClient === selectedClient; return matchClient; }); displayFiles = filtered; countText = filtered.length + ' 个全文搜索结果'; } else { isContentSearchMode = false; contentSearchResults = []; const filtered = files.filter(f => { const matchQuery = !query || f.filename.toLowerCase().includes(query) || f.relativePath.toLowerCase().includes(query); const matchClient = !selectedClient || f.ownerClient === selectedClient; return matchQuery && matchClient; }); displayFiles = filtered; countText = filtered.length + ' / ' + files.length + ' 个文件'; } document.getElementById('count').textContent = countText; const listEl = document.getElementById('list'); listEl.innerHTML = ''; if (!displayFiles.length) { listEl.innerHTML = '<div class="empty">没有匹配的文件</div>'; return; } for (const f of displayFiles) { const div = document.createElement('div'); div.className = 'item'; const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = selectedIds.has(f.id); cb.onchange = (e) => { e.stopPropagation(); toggleSelect(f.id); }; div.appendChild(cb); const content = document.createElement('div'); content.className = 'item-content'; content.onclick = () => selectFile(f, div); const badge = f.isContentMatch ? '<span class="badge">全文</span>' : ''; content.innerHTML = '<div class="name">' + escapeHtml(f.filename) + badge + '</div>' + '<div class="meta">' + escapeHtml(f.ownerClient) + ' · ' + escapeHtml(f.relativePath) + ' · ' + escapeHtml(f.humanSize || '') + '</div>' + '<div class="meta">创建时间：' + escapeHtml(f.createTime || f.modifyTime || '') + '</div>'; div.appendChild(content); listEl.appendChild(div); } updateBatchButton(); } function toggleSelect(id) { if (selectedIds.has(id)) selectedIds.delete(id); else selectedIds.add(id); updateBatchButton(); document.getElementById('selectAll').checked = selectedIds.size === files.length; } function toggleSelectAll() { const checked = document.getElementById('selectAll').checked; if (checked) { files.forEach(f => selectedIds.add(f.id)); } else { selectedIds.clear(); } render(); } function updateBatchButton() { const btn = document.getElementById('batchDownloadBtn'); btn.disabled = selectedIds.size === 0; btn.textContent = '批量下载' + (selectedIds.size > 0 ? ' (' + selectedIds.size + ')' : ''); } function selectByDate() { const dateFrom = document.getElementById('dateFrom').value; if (!dateFrom) { alert('请选择起始日期'); return; } const fromTime = new Date(dateFrom).getTime(); selectedIds.clear(); files.forEach(f => { const createTime = new Date(f.createTime).getTime(); if (createTime >= fromTime) selectedIds.add(f.id); }); render(); } function clearDateFilter() { document.getElementById('dateFrom').value = ''; selectedIds.clear(); render(); } function selectFile(f, el) { selected = f; document.querySelectorAll('.item').forEach(x => x.classList.remove('active')); el.classList.add('active'); document.getElementById('title').textContent = f.filename; const downloadBtn = document.getElementById('download'); if (downloadBtn && userPermissions.downloadFile) { downloadBtn.style.display = 'inline-block'; } const printBtn = document.getElementById('printBtn'); if (printBtn && userPermissions.printFile) { printBtn.style.display = 'inline-block'; } const watermarkBtn = document.getElementById('watermarkBtn'); if (watermarkBtn) { const isWordDoc = f.filename.toLowerCase().endsWith('.doc') || f.filename.toLowerCase().endsWith('.docx'); if (isWordDoc && userPermissions.watermarkExport && watermarkEnabled) { watermarkBtn.style.display = 'inline-block'; } else { watermarkBtn.style.display = 'none'; } } if (userPermissions.previewFile) { const frameEl = document.getElementById('frame'); frameEl.removeAttribute('srcdoc'); frameEl.src = '/api/preview?id=' + encodeURIComponent(f.id); } } function downloadFile() { if (selected) location.href = '/api/download?id=' + encodeURIComponent(selected.id); } async function downloadSelected() { if (selectedIds.size === 0) return; const ids = Array.from(selectedIds); if (ids.length === 1) { location.href = '/api/download?id=' + encodeURIComponent(ids[0]); return; } location.href = '/api/batch-download?ids=' + encodeURIComponent(ids.join(',')); } function printPreview() { const frameEl = document.getElementById('frame'); frameEl.contentWindow.focus(); frameEl.contentWindow.print(); } async function generateWatermark() { if (!selected) return; const btn = document.getElementById('watermarkBtn'); btn.disabled = true; btn.textContent = '生成中...'; try { const res = await fetch('/api/watermark/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filePath: selected.relativePath, clientId: selected.ownerClient }) }); if (!res.ok) { const err = await res.json(); alert('生成水印失败: ' + (err.error || '未知错误')); return; } const contentType = res.headers.get('Content-Type'); if (contentType && contentType.includes('application/json')) { const data = await res.json(); console.log('[Watermark] Response data:', data); if (data.mode === 'individual') { console.log('[Watermark] Individual mode, sessionId:', data.sessionId, 'files:', data.files); btn.textContent = '下载中 (0/' + data.files.length + ')...'; for (let i = 0; i < data.files.length; i++) { const fileName = data.files[i]; const downloadUrl = '/api/watermark/download?sessionId=' + encodeURIComponent(data.sessionId) + '&fileName=' + encodeURIComponent(fileName); console.log('[Watermark] Downloading:', downloadUrl); const downloadRes = await fetch(downloadUrl); if (!downloadRes.ok) { alert('下载 ' + fileName + ' 失败'); continue; } const blob = await downloadRes.blob(); const url = window.URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = fileName; document.body.appendChild(a); a.click(); window.URL.revokeObjectURL(url); document.body.removeChild(a); btn.textContent = '下载中 (' + (i+1) + '/' + data.files.length + ')...'; await new Promise(r => setTimeout(r, 200)); } } else { alert('未知响应格式'); } } else { const blob = await res.blob(); const url = window.URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = selected.filename.replace(/\.[^.]+$/, '_水印图片.zip'); document.body.appendChild(a); a.click(); window.URL.revokeObjectURL(url); document.body.removeChild(a); } } catch (e) { alert('生成水印失败: ' + e.message); } finally { btn.disabled = false; btn.textContent = '添加水印导出'; } } function escapeHtml(s) { return String(s || '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m])); } document.getElementById('q').addEventListener('input', () => { if (isContentSearchMode && document.getElementById('q').value.trim() === '') { isContentSearchMode = false; contentSearchResults = []; } render(); }); document.getElementById('q').addEventListener('keydown', (e) => { if (e.key === 'Enter') { doContentSearch(); } }); const resizer = document.getElementById('resizer'); const leftPanel = document.getElementById('fileList'); let isResizing = false; resizer.addEventListener('mousedown', (e) => { isResizing = true; document.body.style.cursor = 'col-resize'; }); document.addEventListener('mousemove', (e) => { if (!isResizing) return; const newWidth = e.clientX; if (newWidth >= 200 && newWidth <= 800) { leftPanel.style.width = newWidth + 'px'; } }); document.addEventListener('mouseup', () => { isResizing = false; document.body.style.cursor = ''; }); async function loadUserPermission() { try { const res = await fetch("/api/user"); const data = await res.json(); if (data.success) { userPermissions = data.user.permissionFlags || {}; watermarkEnabled = data.watermarkEnabled || false; applyPermissionRestrictions(); } } catch (e) { console.error("Failed to load user permission", e); } } function applyPermissionRestrictions() { if (!userPermissions.viewFileList) { document.querySelector(".list")?.remove(); } if (!userPermissions.printFile) { document.getElementById("printBtn")?.remove(); } if (!userPermissions.downloadFile) { document.getElementById("download")?.remove(); } if (!userPermissions.batchDownload) { document.getElementById("batchDownloadBtn")?.remove(); } if (!userPermissions.watermarkExport) { document.getElementById("watermarkBtn")?.remove(); } if (!userPermissions.dateFilter) { document.querySelector(".date-filter")?.remove(); } } loadFiles(); loadUserPermission(); setInterval(() => { if (document.visibilityState === 'visible') { loadFiles(); } }, 3000); </script></body></html>)HTML";
+<!doctype html><html lang="zh-CN"><head> <meta charset="utf-8"> <meta name="viewport" content="width=device-width,initial-scale=1"> <title>CrossNetShare Web</title> <style> body{font-family:Segoe UI,Microsoft YaHei,sans-serif;margin:0;color:#101828;background:#f6f8fb} .top{height:64px;background:#1d3557;color:white;display:flex;align-items:center;gap:16px;padding:0 22px} .top h1{font-size:20px;margin:0} .search{flex:1;max-width:800px;display:flex;gap:8px;align-items:center} .search input{width:100%;border:0;border-radius:8px;padding:10px} .search button{border:0;border-radius:8px;padding:10px 16px;cursor:pointer;background:#10b981;color:white;font-size:14px;white-space:nowrap} .search button:disabled{opacity:0.5;cursor:not-allowed} .date-filter{display:flex;gap:8px;align-items:center;color:white;font-size:14px} .date-filter input[type="date"]{border:0;border-radius:6px;padding:6px;color:#111827} .top-actions{margin-left:auto;display:flex;gap:8px;align-items:center} .btn{border:0;border-radius:8px;padding:10px 14px;cursor:pointer;background:#2563eb;color:white;text-decoration:none;font-size:14px;white-space:nowrap} .btn.secondary{background:#e5e7eb;color:#111827} .btn:disabled{opacity:0.5;cursor:not-allowed} .layout{display:flex;height:calc(100vh - 64px)} .list{width:420px;min-width:200px;max-width:800px;border-right:1px solid #e4e7ec;background:white;overflow:auto} .list-header{padding:10px 14px;border-bottom:2px solid #e4e7ec;background:#f9fafb;display:flex;gap:8px;align-items:center} .client-filter{padding:10px 14px;border-bottom:1px solid #e4e7ec;background:white} .client-filter select{width:100%;border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:14px;color:#111827;background:white} .item{padding:12px 14px;border-bottom:1px solid #eef2f7;cursor:pointer;display:flex;gap:10px;align-items:start} .item:hover{background:#eff6ff} .item.active{background:#dbeafe} .item input[type="checkbox"]{margin-top:4px;width:16px;height:16px;cursor:pointer} .item-content{flex:1;min-width:0} .name{font-weight:600} .meta{font-size:12px;color:#667085;margin-top:4px} .badge{display:inline-block;background:#10b981;color:white;padding:2px 6px;border-radius:4px;font-size:11px;margin-left:6px} .preview{flex:1;display:flex;flex-direction:column;min-width:0;max-height:calc(100vh - 64px);overflow:hidden} .toolbar{background:white;border-bottom:1px solid #e4e7ec;padding:10px;display:flex;gap:8px;align-items:center;overflow-x:auto;flex-shrink:0} .frame{border:0;background:white;margin:16px;border-radius:10px;box-shadow:0 1px 3px #0000001a;width:100%;height:100%;flex:1;min-height:0} .empty{padding:40px;color:#667085;text-align:center} .text-preview{white-space:pre-wrap;padding:20px} .count{color:#667085;font-size:13px} .resizer{width:5px;cursor:col-resize;background:#f3f4f6;flex-shrink:0} .resizer:hover{background:#d1d5db} </style></head><body> <div class="top"> <h1>CrossNetShare Web {{VERSION}}</h1> <div class="search"> <input id="q" placeholder="文件名过滤 / 按回车全文搜索"> <button id="contentSearchBtn" onclick="doContentSearch()">全文搜索</button> </div> <div class="date-filter"> <label>日期筛选:</label> <input type="date" id="dateFrom" style="width:150px"> <button id="selectByDateBtn" class="btn" onclick="selectByDate()">选择</button> <button id="clearDateBtn" class="btn secondary" onclick="clearDateFilter()">清除</button> </div> <div class="top-actions"> <button class="btn" onclick="downloadSelected()" id="batchDownloadBtn" disabled>批量下载</button> <a class="btn secondary" href="/api/logout">退出</a> </div> </div> <div class="layout"> <div class="list" id="fileList"> <div class="client-filter"> <select id="clientFilter" onchange="render()"> <option value="">全部客户端</option> </select> </div> <div class="list-header"> <input type="checkbox" id="selectAll" onchange="toggleSelectAll()"> <label for="selectAll" style="flex:1;cursor:pointer">全选 / 全不选</label> <span id="count" class="count"></span> </div> <div id="list"> <div class="empty">正在加载...</div> </div> </div> <div class="resizer" id="resizer"></div> <div class="preview"> <div class="toolbar"> <strong id="title" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">请选择文件</strong> <button id="watermarkBtn" class="btn secondary" style="display:none" onclick="generateWatermark()">添加水印导出</button> <button id="download" class="btn" style="display:none" onclick="downloadFile()">下载</button> <button id="printBtn" class="btn secondary" style="display:none" onclick="printPreview()">打印</button> </div> <iframe id="frame" class="frame" srcdoc="<div class='empty'>选择左侧文件后在这里预览</div>"></iframe> </div> </div> <script> let files = [], selected = null, userPermissions = {}, watermarkEnabled = false, selectedIds = new Set(), contentSearchResults = [], isContentSearchMode = false, isApprovalMode = false; async function loadFiles() { const r = await fetch('/api/files'); if (r.status === 401) { location.href = '/login'; return; } const j = await r.json(); files = j.files || []; isApprovalMode = (j.mode === 'approval'); files.sort((a, b) => new Date(b.createTime).getTime() - new Date(a.createTime).getTime()); updateClientFilter(); render(); } function updateClientFilter() {
+if (isApprovalMode) { const cf = document.getElementById('clientFilter'); if (cf) cf.parentElement.style.display = 'none'; const csb = document.getElementById('contentSearchBtn'); if (csb) csb.style.display = 'none'; return; }
+const clients = [...new Set(files.map(f => f.ownerClient))].sort(); const select = document.getElementById('clientFilter'); const currentValue = select.value; select.innerHTML = '<option value="">全部客户端</option>'; for (const client of clients) { const option = document.createElement('option'); option.value = client; option.textContent = client; select.appendChild(option); } select.value = currentValue; } async function doContentSearch() { const query = document.getElementById('q').value.trim(); if (!query) { alert('请输入搜索关键词'); return; } const btn = document.getElementById('contentSearchBtn'); btn.disabled = true; btn.textContent = '搜索中...'; try { const r = await fetch('/api/content-search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: query }) }); if (r.status === 401) { location.href = '/login'; return; } const j = await r.json(); if (j.success) { contentSearchResults = j.results || []; isContentSearchMode = true; render(); } else { alert('搜索失败: ' + (j.error || '未知错误')); } } catch (e) { alert('搜索失败: ' + e.message); } finally { btn.disabled = false; btn.textContent = '全文搜索'; } } function render() { const query = document.getElementById('q').value.trim().toLowerCase(); const selectedClient = document.getElementById('clientFilter').value; let displayFiles = []; let countText = ''; if (isContentSearchMode && contentSearchResults.length > 0) { displayFiles = contentSearchResults.map(r => ({ id: r.ownerClient + '|' + r.relativePath, filename: r.filename, relativePath: r.relativePath, ownerClient: r.ownerClient, size: r.size, humanSize: '', modifyTime: r.modifyTime, createTime: '', isContentMatch: true })); const filtered = displayFiles.filter(f => { const matchClient = !selectedClient || f.ownerClient === selectedClient; return matchClient; }); displayFiles = filtered; countText = filtered.length + ' 个全文搜索结果'; } else { isContentSearchMode = false; contentSearchResults = []; const filtered = files.filter(f => { const matchQuery = !query || f.filename.toLowerCase().includes(query) || f.relativePath.toLowerCase().includes(query); const matchClient = !selectedClient || f.ownerClient === selectedClient; return matchQuery && matchClient; }); displayFiles = filtered; countText = filtered.length + ' / ' + files.length + ' 个文件'; } document.getElementById('count').textContent = countText; const listEl = document.getElementById('list'); listEl.innerHTML = ''; if (!displayFiles.length) { listEl.innerHTML = '<div class="empty">没有匹配的文件</div>'; return; } for (const f of displayFiles) { const div = document.createElement('div'); div.className = 'item'; const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = selectedIds.has(f.id); cb.onchange = (e) => { e.stopPropagation(); toggleSelect(f.id); }; div.appendChild(cb); const content = document.createElement('div'); content.className = 'item-content'; content.onclick = () => selectFile(f, div); const badge = f.isContentMatch ? '<span class="badge">全文</span>' : ''; content.innerHTML = isApprovalMode ?
+            '<div class="name">' + escapeHtml(f.filename) + badge + '</div>' +
+            '<div class="meta">' + escapeHtml(f.wordCode || '') + '</div>' +
+            '<div class="meta">' + escapeHtml(f.summary || '') + '</div>'
+          : '<div class="name">' + escapeHtml(f.filename) + badge + '</div>' + '<div class="meta">' + escapeHtml(f.ownerClient) + ' · ' + escapeHtml(f.relativePath) + ' · ' + escapeHtml(f.humanSize || '') + '</div>' + '<div class="meta">创建时间：' + escapeHtml(f.createTime || f.modifyTime || '') + '</div>'; div.appendChild(content); listEl.appendChild(div); } updateBatchButton(); } function toggleSelect(id) { if (selectedIds.has(id)) selectedIds.delete(id); else selectedIds.add(id); updateBatchButton(); document.getElementById('selectAll').checked = selectedIds.size === files.length; } function toggleSelectAll() { const checked = document.getElementById('selectAll').checked; if (checked) { files.forEach(f => selectedIds.add(f.id)); } else { selectedIds.clear(); } render(); } function updateBatchButton() { const btn = document.getElementById('batchDownloadBtn'); btn.disabled = selectedIds.size === 0; btn.textContent = '批量下载' + (selectedIds.size > 0 ? ' (' + selectedIds.size + ')' : ''); } function selectByDate() { const dateFrom = document.getElementById('dateFrom').value; if (!dateFrom) { alert('请选择起始日期'); return; } const fromTime = new Date(dateFrom).getTime(); selectedIds.clear(); files.forEach(f => { const ds = isApprovalMode ? (f.fileReceiveDate || f.createTime) : f.createTime; const ct = new Date(ds).getTime(); if (ct >= fromTime) selectedIds.add(f.id); }); render(); } function clearDateFilter() { document.getElementById('dateFrom').value = ''; selectedIds.clear(); render(); } function selectFile(f, el) { selected = f; document.querySelectorAll('.item').forEach(x => x.classList.remove('active')); el.classList.add('active'); document.getElementById('title').textContent = f.filename; const downloadBtn = document.getElementById('download'); if (downloadBtn && userPermissions.downloadFile) { downloadBtn.style.display = 'inline-block'; } const printBtn = document.getElementById('printBtn'); if (printBtn && userPermissions.printFile) { printBtn.style.display = 'inline-block'; } const watermarkBtn = document.getElementById('watermarkBtn'); if (watermarkBtn) {
+const isWordDoc = f.filename.toLowerCase().endsWith('.doc') || f.filename.toLowerCase().endsWith('.docx');
+const isApprovalDoc = isApprovalMode;
+if ((isWordDoc || isApprovalDoc) && userPermissions.watermarkExport && watermarkEnabled) {
+watermarkBtn.style.display = 'inline-block';
+}
+else {
+watermarkBtn.style.display = 'none';
+}
+} if (userPermissions.previewFile) { const frameEl = document.getElementById('frame'); frameEl.removeAttribute('srcdoc'); frameEl.src = '/api/preview?id=' + encodeURIComponent(f.id); } } function downloadFile() { if (selected) location.href = '/api/download?id=' + encodeURIComponent(selected.id); } async function downloadSelected() { if (selectedIds.size === 0) return; const ids = Array.from(selectedIds); if (ids.length === 1) { location.href = '/api/download?id=' + encodeURIComponent(ids[0]); return; } location.href = '/api/batch-download?ids=' + encodeURIComponent(ids.join(',')); } function printPreview() { const frameEl = document.getElementById('frame'); frameEl.contentWindow.focus(); frameEl.contentWindow.print(); } async function generateWatermark() { if (!selected) return; const btn = document.getElementById('watermarkBtn'); btn.disabled = true; btn.textContent = '生成中...'; try { const res = await fetch('/api/watermark/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filePath: selected.relativePath, clientId: selected.ownerClient, isApproval: isApprovalMode, id: selected.id }) }); if (!res.ok) { const err = await res.json(); alert('生成水印失败: ' + (err.error || '未知错误')); return; } const contentType = res.headers.get('Content-Type'); if (contentType && contentType.includes('application/json')) { const data = await res.json(); console.log('[Watermark] Response data:', data); if (data.mode === 'individual') { console.log('[Watermark] Individual mode, sessionId:', data.sessionId, 'files:', data.files); btn.textContent = '下载中 (0/' + data.files.length + ')...'; for (let i = 0; i < data.files.length; i++) { const fileName = data.files[i]; const downloadUrl = '/api/watermark/download?sessionId=' + encodeURIComponent(data.sessionId) + '&fileName=' + encodeURIComponent(fileName); console.log('[Watermark] Downloading:', downloadUrl); const downloadRes = await fetch(downloadUrl); if (!downloadRes.ok) { alert('下载 ' + fileName + ' 失败'); continue; } const blob = await downloadRes.blob(); const url = window.URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = fileName; document.body.appendChild(a); a.click(); window.URL.revokeObjectURL(url); document.body.removeChild(a); btn.textContent = '下载中 (' + (i+1) + '/' + data.files.length + ')...'; await new Promise(r => setTimeout(r, 200)); } } else { alert('未知响应格式'); } } else { const blob = await res.blob(); const url = window.URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = selected.filename.replace(/\.[^.]+$/, '_水印图片.zip'); document.body.appendChild(a); a.click(); window.URL.revokeObjectURL(url); document.body.removeChild(a); } } catch (e) { alert('生成水印失败: ' + e.message); } finally { btn.disabled = false; btn.textContent = '添加水印导出'; } } function escapeHtml(s) { return String(s || '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m])); } document.getElementById('q').addEventListener('input', () => { if (isContentSearchMode && document.getElementById('q').value.trim() === '') { isContentSearchMode = false; contentSearchResults = []; } render(); }); document.getElementById('q').addEventListener('keydown', (e) => { if (e.key === 'Enter') { doContentSearch(); } }); const resizer = document.getElementById('resizer'); const leftPanel = document.getElementById('fileList'); let isResizing = false; resizer.addEventListener('mousedown', (e) => { isResizing = true; document.body.style.cursor = 'col-resize'; }); document.addEventListener('mousemove', (e) => { if (!isResizing) return; const newWidth = e.clientX; if (newWidth >= 200 && newWidth <= 800) { leftPanel.style.width = newWidth + 'px'; } }); document.addEventListener('mouseup', () => { isResizing = false; document.body.style.cursor = ''; }); async function loadUserPermission() { try { const res = await fetch("/api/user"); const data = await res.json(); if (data.success) { userPermissions = data.user.permissionFlags || {}; watermarkEnabled = data.watermarkEnabled || false; applyPermissionRestrictions(); } } catch (e) { console.error("Failed to load user permission", e); } } function applyPermissionRestrictions() { if (!userPermissions.viewFileList) { document.querySelector(".list")?.remove(); } if (!userPermissions.printFile) { document.getElementById("printBtn")?.remove(); } if (!userPermissions.downloadFile) { document.getElementById("download")?.remove(); } if (!userPermissions.batchDownload) { document.getElementById("batchDownloadBtn")?.remove(); } if (!userPermissions.watermarkExport) { document.getElementById("watermarkBtn")?.remove(); } if (!userPermissions.dateFilter) { document.querySelector(".date-filter")?.remove(); } } loadFiles(); loadUserPermission(); setInterval(() => { if (document.visibilityState === 'visible') { loadFiles(); } }, 3000); </script></body></html>)HTML";
 
     // 替换版本号占位符
     QString html = QString::fromUtf8(htmlTemplate);
@@ -923,6 +1215,40 @@ void WebServer::handleWatermarkGenerate(QTcpSocket* socket, const HttpRequest& r
     QJsonObject obj = doc.object();
     QString filePath = obj["filePath"].toString();
     QString clientId = obj["clientId"].toString();
+    bool isApproval = obj["isApproval"].toBool();
+    QString approvalId = obj["id"].toString();
+
+    // ===== 批办单模式：从数据库生成 PDF，再加水印 =====
+    if (isApproval && !approvalId.isEmpty() && DbManager::instance()->isDatabaseLoaded()) {
+        ApprovalRecord record;
+        if (!DbManager::instance()->getRecordById(approvalId, record)) {
+            response.statusCode = 404;
+            response.statusText = "Not Found";
+            response.headers["Content-Type"] = "application/json; charset=utf-8";
+            response.body = R"({"success":false,"error":"找不到该批办单记录"})";
+            sendResponse(socket, response);
+            return;
+        }
+        QString templatePath, errMsg, outDocx, outPdf;
+        QString generated = DbManager::instance()->generateDocument(record, templatePath, outDocx, outPdf, errMsg);
+        if (generated.isEmpty()) {
+            response.statusCode = 500;
+            response.statusText = "Internal Server Error";
+            response.headers["Content-Type"] = "application/json; charset=utf-8";
+            response.body = jsonResponse({{"success", false}, {"error", "生成文档失败: " + errMsg.toStdString()}});
+            sendResponse(socket, response);
+            return;
+        }
+        AuditLogger::instance()->log(username, AuditAction::DownloadFile,
+                                     record.receiveNumber, socket->peerAddress().toString(), true);
+        // 创建临时目录用于水印处理
+        QString tempDir = QDir::tempPath() + "/crossnet_wm_approval_" + QString::number(QDateTime::currentMSecsSinceEpoch());
+        QDir().mkpath(tempDir);
+        QString tempPdfPath = tempDir + "/" + record.receiveNumber + ".pdf";
+        QFile::copy(outPdf, tempPdfPath);
+        processWatermarkGeneration(socket, tempDir, tempPdfPath, username);
+        return;
+    }
 
     if (filePath.isEmpty() || clientId.isEmpty()) {
         response.statusCode = 400;

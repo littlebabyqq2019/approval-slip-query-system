@@ -4,6 +4,7 @@
 #include "../watermark_service.h"
 #include "../document_converter.h"
 #include "../user_manager.h"
+#include "../db_manager.h"
 #include "common/autostart.h"
 #include "common/version.h"
 #include <QVBoxLayout>
@@ -30,6 +31,10 @@ MainWindow::MainWindow(QWidget* parent)
 {
     setupUi();
     setupTrayIcon();
+
+    // 数据库管理器信号连接
+    connect(DbManager::instance(), &DbManager::error, this, &MainWindow::onDbManagerError);
+    connect(DbManager::instance(), &DbManager::databaseChanged, this, &MainWindow::onDbDatabaseChanged);
 
     // 加载用户配置
     QString userConfigFile = QCoreApplication::applicationDirPath() + "/users.json";
@@ -192,6 +197,44 @@ void MainWindow::setupUi() {
     configGrid->addWidget(webPortSpinBox_, 0, 3);
 
     configMainLayout->addLayout(configGrid);
+
+    // 数据库文件选择行
+    QHBoxLayout* dbLayout = new QHBoxLayout();
+    dbLayout->setSpacing(10);
+
+    QLabel* dbLabel = new QLabel("数据库文件:");
+    dbLabel->setStyleSheet("font-weight: normal; font-size: 10pt; min-width: 72px;");
+    dbLayout->addWidget(dbLabel);
+
+    dbPathLineEdit_ = new QLineEdit();
+    dbPathLineEdit_->setPlaceholderText("请选择 H2 数据库文件（*.mv.db，仅选前缀，不含.mv.db后缀）");
+    dbPathLineEdit_->setMinimumHeight(32);
+    dbPathLineEdit_->setStyleSheet("QLineEdit { padding: 4px 10px; border: 1px solid #d1d5db; border-radius: 4px; }");
+    dbLayout->addWidget(dbPathLineEdit_, 1);
+
+    selectDbButton_ = new QPushButton("选择...");
+    selectDbButton_->setMinimumHeight(34);
+    selectDbButton_->setStyleSheet(
+        "QPushButton { padding: 6px 16px; font-size: 10pt; background-color: #0ea5e9; color: white; border: none; border-radius: 4px; } "
+        "QPushButton:hover { background-color: #0284c7; }"
+    );
+    connect(selectDbButton_, &QPushButton::clicked, this, &MainWindow::onSelectDatabaseClicked);
+    dbLayout->addWidget(selectDbButton_);
+
+    refreshDbButton_ = new QPushButton("刷新");
+    refreshDbButton_->setMinimumHeight(34);
+    refreshDbButton_->setStyleSheet(
+        "QPushButton { padding: 6px 16px; font-size: 10pt; background-color: white; border: 1px solid #d1d5db; border-radius: 4px; } "
+        "QPushButton:hover { background-color: #f3f4f6; }"
+    );
+    connect(refreshDbButton_, &QPushButton::clicked, this, &MainWindow::onRefreshDbClicked);
+    dbLayout->addWidget(refreshDbButton_);
+
+    configMainLayout->addLayout(dbLayout);
+
+    dbStatusLabel_ = new QLabel("尚未选择数据库文件");
+    dbStatusLabel_->setStyleSheet("font-size: 9pt; color: #92400e; padding: 4px 10px; background-color: #fef3c7; border-radius: 4px;");
+    configMainLayout->addWidget(dbStatusLabel_);
 
     QHBoxLayout* buttonLayout = new QHBoxLayout();
     buttonLayout->setSpacing(12);
@@ -424,5 +467,58 @@ void MainWindow::onSettingsClicked() {
     }
 }
 
+void MainWindow::onSelectDatabaseClicked() {
+    QString fileName = QFileDialog::getOpenFileName(
+        this,
+        "选择 H2 数据库文件",
+        QDir::homePath(),
+        "H2 数据库文件 (*.mv.db);;所有文件 (*.*)"
+    );
+    if (fileName.isEmpty()) {
+        return;
+    }
+    QString basePath = fileName;
+    if (basePath.endsWith(".mv.db", Qt::CaseInsensitive)) {
+        basePath.chop(6);
+    } else if (basePath.endsWith(".trace.db", Qt::CaseInsensitive)) {
+        basePath.chop(9);
+    }
+    dbPathLineEdit_->setText(QDir::toNativeSeparators(basePath));
+    appendLog("选择数据库文件: " + basePath);
+    bool ok = DbManager::instance()->setDatabasePath(basePath);
+    if (ok) {
+        dbStatusLabel_->setText(QString("数据库已加载: %1").arg(QDir::toNativeSeparators(basePath)));
+        dbStatusLabel_->setStyleSheet("font-size: 9pt; color: #166534; padding: 4px 10px; background-color: #dcfce7; border-radius: 4px;");
+    } else {
+        dbStatusLabel_->setText("加载数据库失败，请检查文件路径");
+        dbStatusLabel_->setStyleSheet("font-size: 9pt; color: #991b1b; padding: 4px 10px; background-color: #fee2e2; border-radius: 4px;");
+    }
+}
+
+void MainWindow::onRefreshDbClicked() {
+    QString path = dbPathLineEdit_->text().trimmed();
+    if (path.isEmpty()) {
+        QMessageBox::information(this, "提示", "请先选择数据库文件");
+        return;
+    }
+    bool ok = DbManager::instance()->setDatabasePath(QDir::fromNativeSeparators(path));
+    if (ok) {
+        appendLog("数据库刷新成功");
+        int count = DbManager::instance()->getAllRecords().size();
+        dbStatusLabel_->setText(QString("数据库已加载，共 %1 条记录").arg(count));
+        dbStatusLabel_->setStyleSheet("font-size: 9pt; color: #166534; padding: 4px 10px; background-color: #dcfce7; border-radius: 4px;");
+    }
+}
+
+void MainWindow::onDbManagerError(const QString& msg) {
+    appendLog("[数据库错误] " + msg);
+}
+
+void MainWindow::onDbDatabaseChanged() {
+    int count = DbManager::instance()->getAllRecords().size();
+    dbStatusLabel_->setText(QString("数据库已加载，共 %1 条记录").arg(count));
+    dbStatusLabel_->setStyleSheet("font-size: 9pt; color: #166534; padding: 4px 10px; background-color: #dcfce7; border-radius: 4px;");
+    appendLog(QString("数据库更新，共 %1 条批办单记录").arg(count));
+}
 
 }
