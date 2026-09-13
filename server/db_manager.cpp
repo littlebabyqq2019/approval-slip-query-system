@@ -168,13 +168,13 @@ bool DbManager::refresh() {
         qWarning() << "[DbManager] 找不到 db_query.py 脚本, 尝试使用源码目录";
         script = QDir::cleanPath(qApp->applicationDirPath() + "/../../server/db_query.py");
     }
-    QString error;
+    QString errStr;
     QStringList args;
     args << script << dbBasePath_ << "list";
-    auto result = runPythonJson(args, error);
+    auto result = runPythonJson(args, errStr);
     if (result.isEmpty()) {
-        qWarning() << "[DbManager] refresh failed:" << error;
-        emit error("读取数据库失败: " + error);
+        qWarning() << "[DbManager] refresh failed:" << errStr;
+        emit error("读取数据库失败: " + errStr);
         return false;
     }
     QList<ApprovalRecord> recs;
@@ -203,11 +203,11 @@ QList<ApprovalRecord> DbManager::searchRecords(const QString& keyword) const {
     if (!QFileInfo::exists(script)) {
         script = QDir::cleanPath(qApp->applicationDirPath() + "/../../server/db_query.py");
     }
-    QString error;
+    QString errStr;
     lock.unlock();
     QStringList args;
     args << script << dbBasePath_ << "search" << keyword;
-    auto result = runPythonJson(args, error);
+    auto result = runPythonJson(args, errStr);
     if (result.isEmpty()) {
         return {};
     }
@@ -231,11 +231,11 @@ bool DbManager::getRecordById(const QString& id, ApprovalRecord& outRecord) cons
     if (!QFileInfo::exists(script)) {
         script = QDir::cleanPath(qApp->applicationDirPath() + "/../../server/db_query.py");
     }
-    QString error;
+    QString errStr;
     lock.unlock();
     QStringList args;
     args << script << dbBasePath_ << "get" << id;
-    auto result = runPythonJson(args, error);
+    auto result = runPythonJson(args, errStr);
     if (result.isEmpty()) return false;
     QJsonParseError perr;
     auto doc = QJsonDocument::fromJson(result["json"].toUtf8(), &perr);

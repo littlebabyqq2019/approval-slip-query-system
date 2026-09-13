@@ -25,6 +25,7 @@ public:
 
     static PreviewResult previewFile(const QString& filePath);
     static bool isPreviewSupported(const QString& filePath);
+    static QString findPython();
 
     // 直接将 Word 文档转换为高质量 JPG 图片（绕过 PDF）
     static QString convertWordToJpg(const QString& filePath, const QString& outputDir);
@@ -35,7 +36,6 @@ private:
     static PreviewResult previewPdf(const QString& filePath);
     static PreviewResult previewWord(const QString& filePath);
     static PreviewResult convertWordWithAspose(const QString& filePath);
-    static QString findPython();
     static QString findAsposeLicense();
     static QByteArray htmlEscape(const QString& text);
 
