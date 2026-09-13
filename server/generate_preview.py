@@ -150,14 +150,10 @@ def docx_to_html(docx_path, app_dir):
             pass
 
     doc = aw.Document(docx_path)
-    save_options = aw.saving.HtmlSaveOptions()
-    save_options.export_images_as_base64 = True
-    save_options.save_format = aw.SaveFormat.HTML
-    save_options.embed_css = True
 
     import io
     stream = io.BytesIO()
-    doc.save(stream, save_options)
+    doc.save(stream, aw.SaveFormat.HTML)
     html = stream.getvalue().decode('utf-8', errors='replace')
     return html
 
