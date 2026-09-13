@@ -66,11 +66,6 @@ public:
                              QString& outputPdfPath,
                              QString& errorMessage);
 
-    // 根据记录生成 HTML 预览（使用 Aspose.Words 转换，保留模板样式）
-    QString generatePreviewHtml(const ApprovalRecord& record,
-                                const QString& templatePath,
-                                QString& errorMessage);
-
     static DbManager* instance();
 
 signals:

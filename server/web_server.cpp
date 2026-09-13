@@ -892,20 +892,38 @@ void WebServer::handleFilePreview(QTcpSocket* socket, const HttpRequest& request
         // 记录审计
         AuditLogger::instance()->log(username, AuditAction::PreviewFile,
                                      record.receiveNumber, socket->peerAddress().toString(), true);
-        // 使用 Aspose.Words 将填充后的模板转为 HTML，保留模板原始样式
+        // 填充模板生成 PDF，用浏览器内置 PDF 查看器展示（布局与 Word 完全一致）
         QString templatePath = QCoreApplication::applicationDirPath() + "/模板.docx";
         QString errMsg;
-        QString html = DbManager::instance()->generatePreviewHtml(record, templatePath, errMsg);
-        if (html.isEmpty()) {
-            qWarning() << "[WebServer] generatePreviewHtml failed:" << errMsg;
-            html = QString("<div style='padding:24px;color:#991b1b'>预览生成失败: %1</div>").arg(errMsg.toHtmlEscaped());
+        QString docxPath, pdfPath;
+        QString generatedPdf = DbManager::instance()->generateDocument(record, templatePath,
+                                                                       docxPath, pdfPath, errMsg);
+        if (generatedPdf.isEmpty() || !QFile::exists(pdfPath)) {
+            qWarning() << "[WebServer] preview PDF generation failed:" << errMsg;
+            HttpResponse response;
+            response.statusCode = 200;
+            response.headers["Content-Type"] = "text/html; charset=utf-8";
+            response.body = QString("<div style='padding:24px;color:#991b1b'>预览生成失败: %1</div>").arg(errMsg.toHtmlEscaped()).toUtf8();
+            sendResponse(socket, response);
+            return;
         }
-
+        // 读取 PDF 文件内容返回给浏览器
+        QFile pdfFile(pdfPath);
+        if (!pdfFile.open(QIODevice::ReadOnly)) {
+            HttpResponse response;
+            response.statusCode = 500;
+            response.headers["Content-Type"] = "text/html; charset=utf-8";
+            response.body = "无法读取生成的 PDF 文件";
+            sendResponse(socket, response);
+            return;
+        }
         HttpResponse response;
         response.statusCode = 200;
         response.statusText = "OK";
-        response.headers["Content-Type"] = "text/html; charset=utf-8";
-        response.body = html.toUtf8();
+        response.headers["Content-Type"] = "application/pdf";
+        response.headers["Content-Disposition"] = "inline";
+        response.body = pdfFile.readAll();
+        pdfFile.close();
         sendResponse(socket, response);
         return;
     }

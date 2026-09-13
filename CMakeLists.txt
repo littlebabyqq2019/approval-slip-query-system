@@ -167,10 +167,7 @@ if(WIN32)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_SOURCE_DIR}/server/fill_template.py"
             "$<TARGET_FILE_DIR:CrossNetShareServer>/fill_template.py"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_SOURCE_DIR}/server/generate_preview.py"
-            "$<TARGET_FILE_DIR:CrossNetShareServer>/generate_preview.py"
-        COMMENT "Copying Python scripts (word_to_pdf, db_query, fill_template, generate_preview)..."
+        COMMENT "Copying Python scripts (word_to_pdf, db_query, fill_template)..."
     )
     
     # 复制批办单模板和 H2 数据库 jar
