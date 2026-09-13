@@ -78,24 +78,68 @@ def find_span_cell_by_first_label(table, row_idx, first_label):
     return row.cells[-1] if row.cells else None
 
 
-def set_cell_text(cell, text):
-    """设置单元格文本，保留样式。"""
+def set_cell_text(cell, text, table=None, row_idx=None):
+    """设置单元格文本，保留模板原有格式。
+    
+    当目标单元格已有run时，保留第一个run的格式属性，仅替换文字。
+    当目标单元格为空（无run）时，从同一行的非空单元格（通常是标签单元格）
+    复制字体、字号、颜色等格式属性，确保填充文字与模板格式一致。
+    """
     if cell is None:
         return
     text = text or ''
-    # 清空现有段落中的run文字（但保留第一个段落格式）
-    if cell.paragraphs:
-        first_para = cell.paragraphs[0]
-        # 清除原有runs
+    if not cell.paragraphs:
+        cell.add_paragraph(text)
+        return
+
+    first_para = cell.paragraphs[0]
+    if first_para.runs:
+        # 单元格已有run：保留第一个run的格式，仅替换文字
         for run in first_para.runs:
             run.text = ''
-        # 设置到第一个run，或新增
-        if first_para.runs:
-            first_para.runs[0].text = text
-        else:
-            first_para.add_run(text)
+        first_para.runs[0].text = text
     else:
-        cell.add_paragraph(text)
+        # 单元格为空：从同一行非空单元格复制格式
+        ref_run = None
+        if table is not None and row_idx is not None:
+            for c in table.rows[row_idx].cells:
+                if c is cell:
+                    continue
+                if c.paragraphs and c.paragraphs[0].runs:
+                    ref_run = c.paragraphs[0].runs[0]
+                    break
+        new_run = first_para.add_run(text)
+        if ref_run is not None:
+            _copy_run_format(ref_run, new_run)
+
+
+def _copy_run_format(src_run, dst_run):
+    """从 src_run 复制字体格式到 dst_run。"""
+    try:
+        if src_run.font.name:
+            dst_run.font.name = src_run.font.name
+    except Exception:
+        pass
+    try:
+        if src_run.font.size:
+            dst_run.font.size = src_run.font.size
+    except Exception:
+        pass
+    try:
+        if src_run.font.bold is not None:
+            dst_run.font.bold = src_run.font.bold
+    except Exception:
+        pass
+    try:
+        if src_run.font.italic is not None:
+            dst_run.font.italic = src_run.font.italic
+    except Exception:
+        pass
+    try:
+        if src_run.font.color and src_run.font.color.rgb:
+            dst_run.font.color.rgb = src_run.font.color.rgb
+    except Exception:
+        pass
 
 
 def fill_template(template_path, record, output_docx_path):
@@ -120,48 +164,48 @@ def fill_template(template_path, record, output_docx_path):
 
     # 行1：来文单位（列1-2重复）
     c = find_content_cell(table, 0, '来文单位')
-    set_cell_text(c, department)
+    set_cell_text(c, department, table, 0)
 
     # 行2：来文字号（列1-2重复）、收文日期（列8-9重复）
     c = find_content_cell(table, 1, '来文字号')
-    set_cell_text(c, word_code)
+    set_cell_text(c, word_code, table, 1)
     c = find_content_cell(table, 1, '收文日期')
-    set_cell_text(c, receive_date)
+    set_cell_text(c, receive_date, table, 1)
 
     # 行3：来文类型、收文途径
     c = find_content_cell(table, 2, '来文类型')
-    set_cell_text(c, file_category)
+    set_cell_text(c, file_category, table, 2)
     c = find_content_cell(table, 2, '收文途径')
-    set_cell_text(c, receive_channel)
+    set_cell_text(c, receive_channel, table, 2)
 
     # 行4：紧急程度、密级、收文编号
     c = find_content_cell(table, 3, '紧急程度')
-    set_cell_text(c, emergency)
+    set_cell_text(c, emergency, table, 3)
     c = find_content_cell(table, 3, '密 级')
     if c is None:
         c = find_content_cell(table, 3, '密级')
-    set_cell_text(c, secret)
+    set_cell_text(c, secret, table, 3)
     c = find_content_cell(table, 3, '收文编号')
-    set_cell_text(c, receive_number)
+    set_cell_text(c, receive_number, table, 3)
 
     # 行5：文件标题（列1-2标签重复，后面跨列）
     c = find_span_cell_by_first_label(table, 4, '文件标题')
-    set_cell_text(c, summary)
+    set_cell_text(c, summary, table, 4)
 
     # 行6：领导批示
     c = find_span_cell_by_first_label(table, 5, '领导批示')
-    set_cell_text(c, leader)
+    set_cell_text(c, leader, table, 5)
 
     # 行7：拟办意见
     c = find_span_cell_by_first_label(table, 6, '拟办意见')
-    set_cell_text(c, suggestion)
+    set_cell_text(c, suggestion, table, 6)
 
     # 行8：传阅-姓名（留空，不处理）
     # 行9：传阅-日期（留空，不处理）
 
     # 行10：办理结果
     c = find_span_cell_by_first_label(table, 9, '办理结果')
-    set_cell_text(c, process_result)
+    set_cell_text(c, process_result, table, 9)
 
     doc.save(output_docx_path)
 
