@@ -15,6 +15,14 @@ import csv
 import io
 import re
 
+# Force UTF-8 stdout/stderr on Windows (default console code page is GBK/CP936)
+if sys.platform == 'win32':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 H2_JAR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "h2.jar")
 if not os.path.exists(H2_JAR):
     H2_JAR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "h2.jar")
@@ -24,7 +32,11 @@ if not os.path.exists(H2_JAR):
 def run_h2(db_path, sql):
     url = f"jdbc:h2:{db_path};IFEXISTS=TRUE;ACCESS_MODE_DATA=r"
     cmd = [
-        "java", "-cp", H2_JAR, "org.h2.tools.Shell",
+        "java",
+        "-Dfile.encoding=UTF-8",
+        "-Dstdout.encoding=UTF-8",
+        "-Dsun.stdout.encoding=UTF-8",
+        "-cp", H2_JAR, "org.h2.tools.Shell",
         "-url", url,
         "-user", "sa",
         "-password", "",
@@ -33,10 +45,14 @@ def run_h2(db_path, sql):
     env = os.environ.copy()
     env['JAVA_TOOL_OPTIONS'] = '-Dfile.encoding=UTF-8'
     result = subprocess.run(cmd, capture_output=True, cwd=os.path.dirname(H2_JAR), env=env)
-    try:
-        return result.stdout.decode('utf-8', errors='replace')
-    except Exception:
-        return result.stdout.decode('gbk', errors='replace')
+    raw = result.stdout
+    # Try UTF-8 first; if replacement chars appear, fall back to GBK (Windows Chinese default)
+    text = raw.decode('utf-8', errors='replace')
+    if '\ufffd' in text:
+        gbk_text = raw.decode('gbk', errors='replace')
+        if '\ufffd' not in gbk_text:
+            return gbk_text
+    return text
 
 
 def parse_table(output):

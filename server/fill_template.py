@@ -30,6 +30,14 @@ import shutil
 import subprocess
 from docx import Document
 
+# Force UTF-8 stdout/stderr on Windows (default console code page is GBK/CP936)
+if sys.platform == 'win32':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 
 def find_content_cell(table, row_idx, target_merged_label_left, offset_from_label=1):
     """在表格的row_idx行中，找到标签单元格后面的内容单元格。

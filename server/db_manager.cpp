@@ -53,6 +53,7 @@ QMap<QString, QString> DbManager::runPythonJson(const QStringList& args, QString
     QProcess process;
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
     env.insert("JAVA_TOOL_OPTIONS", "-Dfile.encoding=UTF-8");
+    env.insert("PYTHONIOENCODING", "utf-8");
     process.setProcessEnvironment(env);
 
     QStringList allArgs = args;
@@ -298,6 +299,7 @@ QString DbManager::generateDocument(const ApprovalRecord& record,
     QProcess process;
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
     env.insert("JAVA_TOOL_OPTIONS", "-Dfile.encoding=UTF-8");
+    env.insert("PYTHONIOENCODING", "utf-8");
     process.setProcessEnvironment(env);
 
     QStringList args;
