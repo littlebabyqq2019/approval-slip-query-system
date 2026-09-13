@@ -97,7 +97,22 @@ def set_cell_text(cell, text, table=None, row_idx=None):
         # 单元格已有run：保留第一个run的格式，仅替换文字
         for run in first_para.runs:
             run.text = ''
-        first_para.runs[0].text = text
+        first_run = first_para.runs[0]
+        first_run.text = text
+        # 强制黑色、非粗体、非斜体（内容文字不应为红色或粗体）
+        try:
+            from docx.shared import RGBColor
+            first_run.font.color.rgb = RGBColor(0, 0, 0)
+        except Exception:
+            pass
+        try:
+            first_run.font.bold = False
+        except Exception:
+            pass
+        try:
+            first_run.font.italic = False
+        except Exception:
+            pass
     else:
         # 单元格为空：从同一行非空单元格复制格式
         ref_run = None
@@ -114,7 +129,10 @@ def set_cell_text(cell, text, table=None, row_idx=None):
 
 
 def _copy_run_format(src_run, dst_run):
-    """从 src_run 复制字体格式到 dst_run。"""
+    """从 src_run 复制字体名和字号到 dst_run。
+    颜色强制为黑色，粗体/斜体强制为非粗体/非斜体，
+    因为填充的是内容文字，不应继承标签单元格的红色或粗体样式。
+    """
     try:
         if src_run.font.name:
             dst_run.font.name = src_run.font.name
@@ -125,19 +143,18 @@ def _copy_run_format(src_run, dst_run):
             dst_run.font.size = src_run.font.size
     except Exception:
         pass
+    # 强制黑色、非粗体、非斜体
     try:
-        if src_run.font.bold is not None:
-            dst_run.font.bold = src_run.font.bold
+        from docx.shared import RGBColor
+        dst_run.font.color.rgb = RGBColor(0, 0, 0)
     except Exception:
         pass
     try:
-        if src_run.font.italic is not None:
-            dst_run.font.italic = src_run.font.italic
+        dst_run.font.bold = False
     except Exception:
         pass
     try:
-        if src_run.font.color and src_run.font.color.rgb:
-            dst_run.font.color.rgb = src_run.font.color.rgb
+        dst_run.font.italic = False
     except Exception:
         pass
 

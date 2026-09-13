@@ -120,32 +120,10 @@ def parse_table(output):
 
 
 def compute_receive_number(rows):
-    """按 来文类型FILE_CATEGORY + 年份后两位 + 同年同类序号 生成 收文编号 如 A-26-1"""
-    def safe_int(val):
-        try:
-            return int(val)
-        except (ValueError, TypeError):
-            return 0
-
-    # 先按 FILE_RECEIVE_DATE 升序排序编号
-    def sort_key(r):
-        date_str = r.get('FILE_RECEIVE_DATE', '') or ''
-        return (date_str, safe_int(r.get('ID', '0') or '0'))
-
-    # 按 类型+年份 分组编号
-    groups = {}
-    sorted_rows = sorted(rows, key=sort_key)
-    for r in sorted_rows:
-        cat = r.get('FILE_CATEGORY', '') or 'UNKNOWN'
-        date_str = r.get('FILE_RECEIVE_DATE', '') or ''
-        year_suffix = date_str[2:4] if len(date_str) >= 4 else '00'
-        key = (cat, year_suffix)
-        if key not in groups:
-            groups[key] = 1
-        else:
-            groups[key] += 1
-        seq = groups[key]
-        r['RECEIVE_NUMBER'] = f"{cat}-{year_suffix}-{seq}"
+    """使用数据库唯一ID生成收文编号: 批办单#ID"""
+    for r in rows:
+        rid = r.get('ID', '') or ''
+        r['RECEIVE_NUMBER'] = f"批办单#{rid}"
     return rows
 
 
