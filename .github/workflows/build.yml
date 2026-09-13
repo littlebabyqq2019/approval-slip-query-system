@@ -1,4 +1,4 @@
-name: Build CrossNetShare
+name: Build Approval Slip Query System
 
 on:
   push:
@@ -27,13 +27,6 @@ jobs:
         target: 'desktop'
         arch: 'win64_msvc2019_64'
         cache: false
-        # jurplel/install-qt-action@v3 默认的 py7zrversion 是 ==0.20.*，这个
-        # py7zr 版本在 Windows 上解压某些 7z 包时不稳定，会抛出
-        # py7zr.exceptions.Bad7zFile（连续三次失败分别报告 translations、
-        # Qt5AxContainer、QtANGLE 路径损坏，实际是同一个根因）。上游项目后来
-        # 的版本已经把默认值改成了 ==1.1.0 作为规避（提交说明："use an older
-        # version as a workaround for Bad7zFile on Windows"），这里显式指定
-        # 同一个已验证可用的版本。
         py7zrversion: '==1.1.0'
 
     - name: Setup MSVC
@@ -43,101 +36,6 @@ jobs:
       uses: ilammy/msvc-dev-cmd@v1
       with:
         arch: x64
-
-    - name: Download SQLite
-      run: |
-        echo "Downloading SQLite for independent FTS5 support..."
-        
-        # 创建目录
-        mkdir -Force third_party/sqlite
-        
-        # 下载 SQLite DLL (64-bit)
-        $sqliteUrl = "https://www.sqlite.org/2024/sqlite-dll-win-x64-3460100.zip"
-        $sqliteZip = "third_party/sqlite-dll.zip"
-        
-        Write-Host "Downloading SQLite DLL from $sqliteUrl"
-        Invoke-WebRequest -Uri $sqliteUrl -OutFile $sqliteZip
-        
-        # 解压
-        Expand-Archive -Path $sqliteZip -DestinationPath third_party/sqlite -Force
-        
-        # 下载 SQLite tools (包含 .lib 文件)
-        $sqliteToolsUrl = "https://www.sqlite.org/2024/sqlite-tools-win-x64-3460100.zip"
-        $sqliteToolsZip = "third_party/sqlite-tools.zip"
-        
-        Write-Host "Downloading SQLite tools from $sqliteToolsUrl"
-        Invoke-WebRequest -Uri $sqliteToolsUrl -OutFile $sqliteToolsZip
-        
-        # 解压
-        Expand-Archive -Path $sqliteToolsZip -DestinationPath third_party/sqlite-tools -Force
-        
-        # 下载 sqlite3.h (从 amalgamation)
-        $sqliteHeaderUrl = "https://www.sqlite.org/2024/sqlite-amalgamation-3460100.zip"
-        $sqliteHeaderZip = "third_party/sqlite-header.zip"
-        
-        Write-Host "Downloading SQLite headers from $sqliteHeaderUrl"
-        Invoke-WebRequest -Uri $sqliteHeaderUrl -OutFile $sqliteHeaderZip
-        
-        # 解压
-        Expand-Archive -Path $sqliteHeaderZip -DestinationPath third_party/sqlite-header -Force
-        
-        # 复制文件到统一目录
-        Copy-Item third_party/sqlite-header/sqlite-amalgamation-*/sqlite3.h third_party/sqlite/
-        Copy-Item third_party/sqlite-header/sqlite-amalgamation-*/sqlite3ext.h third_party/sqlite/
-        
-        # 生成 .lib 文件 (使用 lib.exe from MSVC)
-        cd third_party/sqlite
-        lib /def:sqlite3.def /out:sqlite3.lib /machine:x64
-        
-        cd ../..
-        
-        # 验证文件
-        if (Test-Path "third_party/sqlite/sqlite3.dll") {
-          Write-Host "✓ sqlite3.dll downloaded"
-        }
-        if (Test-Path "third_party/sqlite/sqlite3.h") {
-          Write-Host "✓ sqlite3.h downloaded"
-        }
-        if (Test-Path "third_party/sqlite/sqlite3.lib") {
-          Write-Host "✓ sqlite3.lib generated"
-        } else {
-          Write-Host "⚠ Warning: sqlite3.lib not found, trying alternative method..."
-          # 如果 lib.exe 失败，尝试使用 dlltool 或直接链接 DLL
-        }
-
-    - name: Build Simple FTS5 Extension
-      run: |
-        echo "Building Simple FTS5 extension for Chinese tokenization..."
-        
-        # 创建 third_party 目录
-        mkdir -Force third_party
-        cd third_party
-        
-        # 克隆 Simple 仓库
-        git clone --depth 1 https://github.com/wangfenjin/simple.git
-        cd simple
-        
-        # 创建构建目录
-        mkdir build
-        cd build
-        
-        # 配置和构建
-        cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release
-        cmake --build . --config Release
-        
-        # 返回根目录
-        cd ../../..
-        
-        # 检查构建结果
-        if (Test-Path "third_party/simple/build/Release/simple.dll") {
-          echo "✓ Simple extension built successfully"
-        } elseif (Test-Path "third_party/simple/build/libsimple/Release/simple.dll") {
-          echo "✓ Simple extension built successfully (alternate location)"
-        } else {
-          echo "⚠ Warning: simple.dll not found in expected locations"
-          echo "Listing build directory contents:"
-          Get-ChildItem -Recurse third_party/simple/build -Filter "*.dll"
-        }
 
     - name: Configure CMake
       run: |
@@ -154,112 +52,49 @@ jobs:
       run: |
         cd build/bin/Release
         & "${{ env.Qt5_DIR }}/bin/windeployqt.exe" --release CrossNetShareServer.exe
-        & "${{ env.Qt5_DIR }}/bin/windeployqt.exe" --release CrossNetShareClient.exe
-        
-        # 复制 Simple 扩展到客户端目录
-        Write-Host "Copying Simple FTS5 extension..."
-        
-        # 尝试多个可能的路径（根据实际构建结果）
-        $simplePaths = @(
-          "../../../third_party/simple/build/src/Release/simple.dll",
-          "../../../third_party/simple/build/Release/simple.dll",
-          "../../../third_party/simple/build/libsimple/Release/simple.dll"
-        )
-        
-        $simpleCopied = $false
-        foreach ($path in $simplePaths) {
-          if (Test-Path $path) {
-            Copy-Item $path . -Force
-            Write-Host "✓ Copied simple.dll from $path"
-            $simpleCopied = $true
-            break
-          }
-        }
-        
-        if (-not $simpleCopied) {
-          Write-Host "⚠ Warning: simple.dll not found, client will fall back to unicode61 tokenizer"
-          Write-Host "   Chinese search may not work optimally"
-          Write-Host "Searched paths:"
-          foreach ($path in $simplePaths) {
-            Write-Host "  - $path"
-          }
-        }
-        
-        # 复制 jieba 词典文件（如果存在）
-        $dictPath = "../../../third_party/simple/dict"
-        if (Test-Path $dictPath) {
-          Write-Host "Copying jieba dictionaries..."
-          New-Item -ItemType Directory -Force -Path "dict" | Out-Null
-          Copy-Item "$dictPath/*" dict/ -Recurse -Force
-          Write-Host "✓ Copied jieba dictionaries"
-        } else {
-          Write-Host "⚠ Warning: jieba dictionary not found at $dictPath"
-        }
 
     - name: Package Release
       run: |
-        mkdir CrossNetShare-Release
-        mkdir CrossNetShare-Release/Server
-        mkdir CrossNetShare-Release/Client
+        mkdir ApprovalSlipQuerySystem-Release
 
-        # 复制服务器
-        Copy-Item build/bin/Release/CrossNetShareServer.exe CrossNetShare-Release/Server/
-        Copy-Item build/bin/Release/*.dll CrossNetShare-Release/Server/ -ErrorAction SilentlyContinue
-        Copy-Item build/bin/Release/*.py CrossNetShare-Release/Server/ -ErrorAction SilentlyContinue
-        Copy-Item build/bin/Release/*.lic CrossNetShare-Release/Server/ -ErrorAction SilentlyContinue
-        Copy-Item build/bin/Release/platforms CrossNetShare-Release/Server/ -Recurse -ErrorAction SilentlyContinue
-        Copy-Item build/bin/Release/styles CrossNetShare-Release/Server/ -Recurse -ErrorAction SilentlyContinue
-        Copy-Item build/bin/Release/plugins CrossNetShare-Release/Server/ -Recurse -ErrorAction SilentlyContinue
-
-        # 复制客户端
-        Copy-Item build/bin/Release/CrossNetShareClient.exe CrossNetShare-Release/Client/
-        Copy-Item build/bin/Release/*.dll CrossNetShare-Release/Client/ -ErrorAction SilentlyContinue
-        Copy-Item build/bin/Release/*.py CrossNetShare-Release/Client/ -ErrorAction SilentlyContinue
-        Copy-Item build/bin/Release/platforms CrossNetShare-Release/Client/ -Recurse -ErrorAction SilentlyContinue
-        Copy-Item build/bin/Release/styles CrossNetShare-Release/Client/ -Recurse -ErrorAction SilentlyContinue
-        Copy-Item build/bin/Release/plugins CrossNetShare-Release/Client/ -Recurse -ErrorAction SilentlyContinue
-        Copy-Item build/bin/Release/sqldrivers CrossNetShare-Release/Client/ -Recurse -ErrorAction SilentlyContinue
-        
-        # 复制 jieba 词典（如果存在）
-        if (Test-Path build/bin/Release/dict) {
-          Copy-Item build/bin/Release/dict CrossNetShare-Release/Client/ -Recurse -ErrorAction SilentlyContinue
-          Write-Host "✓ Copied jieba dictionaries to release package"
-        }
+        # 复制服务器（仅服务器，无客户端）
+        Copy-Item build/bin/Release/CrossNetShareServer.exe ApprovalSlipQuerySystem-Release/
+        Copy-Item build/bin/Release/*.dll ApprovalSlipQuerySystem-Release/ -ErrorAction SilentlyContinue
+        Copy-Item build/bin/Release/*.py ApprovalSlipQuerySystem-Release/ -ErrorAction SilentlyContinue
+        Copy-Item build/bin/Release/*.lic ApprovalSlipQuerySystem-Release/ -ErrorAction SilentlyContinue
+        Copy-Item build/bin/Release/模板.docx ApprovalSlipQuerySystem-Release/ -ErrorAction SilentlyContinue
+        Copy-Item build/bin/Release/h2.jar ApprovalSlipQuerySystem-Release/ -ErrorAction SilentlyContinue
+        Copy-Item build/bin/Release/platforms ApprovalSlipQuerySystem-Release/ -Recurse -ErrorAction SilentlyContinue
+        Copy-Item build/bin/Release/styles ApprovalSlipQuerySystem-Release/ -Recurse -ErrorAction SilentlyContinue
+        Copy-Item build/bin/Release/plugins ApprovalSlipQuerySystem-Release/ -Recurse -ErrorAction SilentlyContinue
 
         # 复制文档
-        Copy-Item README.md CrossNetShare-Release/
-        Copy-Item QUICKSTART.md CrossNetShare-Release/
-        Copy-Item BUILD.md CrossNetShare-Release/
+        Copy-Item README.md ApprovalSlipQuerySystem-Release/ -ErrorAction SilentlyContinue
+        Copy-Item QUICKSTART.md ApprovalSlipQuerySystem-Release/ -ErrorAction SilentlyContinue
+        Copy-Item BUILD.md ApprovalSlipQuerySystem-Release/ -ErrorAction SilentlyContinue
 
         # 创建压缩包
-        Compress-Archive -Path CrossNetShare-Release/* -DestinationPath CrossNetShare-Windows-x64.zip
+        Compress-Archive -Path ApprovalSlipQuerySystem-Release/* -DestinationPath ApprovalSlipQuerySystem-Windows-x64.zip
 
     - name: Upload Build Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: CrossNetShare-Windows-x64
-        path: CrossNetShare-Windows-x64.zip
+        name: ApprovalSlipQuerySystem-Windows-x64
+        path: ApprovalSlipQuerySystem-Windows-x64.zip
         retention-days: 30
 
     - name: Upload Server Executable
       uses: actions/upload-artifact@v4
       with:
-        name: CrossNetShareServer
-        path: CrossNetShare-Release/Server/
-        retention-days: 30
-
-    - name: Upload Client Executable
-      uses: actions/upload-artifact@v4
-      with:
-        name: CrossNetShareClient
-        path: CrossNetShare-Release/Client/
+        name: ApprovalSlipQueryServer
+        path: ApprovalSlipQuerySystem-Release/
         retention-days: 30
 
     - name: Create Release
       if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v2
       with:
-        files: CrossNetShare-Windows-x64.zip
+        files: ApprovalSlipQuerySystem-Windows-x64.zip
         draft: false
         prerelease: false
         generate_release_notes: true

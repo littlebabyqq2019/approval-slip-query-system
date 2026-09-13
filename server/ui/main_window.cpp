@@ -51,8 +51,6 @@ MainWindow::MainWindow(QWidget* parent)
 
     connect(server_, &Server::started, this, &MainWindow::onServerStarted);
     connect(server_, &Server::stopped, this, &MainWindow::onServerStopped);
-    connect(server_, &Server::clientConnected, this, &MainWindow::onClientConnected);
-    connect(server_, &Server::clientDisconnected, this, &MainWindow::onClientDisconnected);
     connect(server_, &Server::logMessage, this, &MainWindow::onLogMessage);
     connect(server_, &Server::error, this, &MainWindow::onServerError);
 
@@ -101,7 +99,7 @@ void MainWindow::setupTrayIcon() {
     // 创建托盘图标
     trayIcon_ = new QSystemTrayIcon(this);
     trayIcon_->setContextMenu(trayMenu_);
-    trayIcon_->setToolTip("CrossNetShare 服务器");
+    trayIcon_->setToolTip("批办单查询系统");
 
     // 使用默认图标
     trayIcon_->setIcon(style()->standardIcon(QStyle::SP_ComputerIcon));
@@ -142,7 +140,7 @@ void MainWindow::onQuitApp() {
 }
 
 void MainWindow::setupUi() {
-    setWindowTitle(QString("CrossNetShare 服务器 v%1").arg(PROJECT_VERSION));
+    setWindowTitle(QString("批办单查询系统 v%1").arg(PROJECT_VERSION));
     resize(980, 800);
 
     // 设置全局字体
@@ -250,15 +248,6 @@ void MainWindow::setupUi() {
     connect(startStopButton_, &QPushButton::clicked, this, &MainWindow::onStartStopClicked);
     buttonLayout->addWidget(startStopButton_);
 
-    refreshButton_ = new QPushButton("刷新文件索引");
-    refreshButton_->setStyleSheet(
-        "QPushButton { padding: 10px 24px; font-size: 10pt; background-color: white; border: 1px solid #d1d5db; border-radius: 6px; } "
-        "QPushButton:hover { background-color: #f3f4f6; }"
-    );
-    refreshButton_->setMinimumHeight(42);
-    connect(refreshButton_, &QPushButton::clicked, this, &MainWindow::onRefreshIndexClicked);
-    buttonLayout->addWidget(refreshButton_);
-
     QPushButton* settingsButton = new QPushButton("设置");
     settingsButton->setStyleSheet(
         "QPushButton { padding: 10px 24px; font-size: 10pt; background-color: white; border: 1px solid #d1d5db; border-radius: 6px; } "
@@ -305,16 +294,6 @@ void MainWindow::setupUi() {
 
     mainLayout->addWidget(statusGroup);
 
-    // 已连接客户端
-    QGroupBox* clientGroup = new QGroupBox("已连接客户端", this);
-    QVBoxLayout* clientLayout = new QVBoxLayout(clientGroup);
-
-    clientListWidget_ = new QListWidget();
-    clientListWidget_->setStyleSheet("QListWidget { font-size: 10pt; border: 1px solid #e5e7eb; border-radius: 4px; } QListWidget::item { padding: 8px; }");
-    clientLayout->addWidget(clientListWidget_);
-
-    mainLayout->addWidget(clientGroup);
-
     // 日志区域
     QGroupBox* logGroup = new QGroupBox("服务器日志", this);
     QVBoxLayout* logLayout = new QVBoxLayout(logGroup);
@@ -329,8 +308,7 @@ void MainWindow::setupUi() {
     // 设置布局比例
     mainLayout->setStretch(0, 0);  // 配置区域固定
     mainLayout->setStretch(1, 0);  // 状态区域固定
-    mainLayout->setStretch(2, 1);  // 客户端列表
-    mainLayout->setStretch(3, 2);  // 日志区域占更多空间
+    mainLayout->setStretch(2, 1);  // 日志区域占更多空间
 }
 
 void MainWindow::onStartStopClicked() {
@@ -349,16 +327,6 @@ void MainWindow::onStartStopClicked() {
     }
 }
 
-void MainWindow::onRefreshIndexClicked() {
-    // 请求所有在线客户端刷新文件列表
-    if (server_) {
-        server_->requestAllClientsRefresh();
-        appendLog("已向所有在线客户端发送刷新请求");
-    } else {
-        appendLog("服务器未运行");
-    }
-}
-
 void MainWindow::onServerStarted() {
     updateServerStatus();
     portSpinBox_->setEnabled(false);
@@ -369,38 +337,6 @@ void MainWindow::onServerStopped() {
     updateServerStatus();
     portSpinBox_->setEnabled(true);
     webPortSpinBox_->setEnabled(true);
-    clientListWidget_->clear();
-}
-
-void MainWindow::onClientConnected(const QString& clientId, const QString& address) {
-    // 先移除已存在的同名客户端（避免重复）
-    for (int i = 0; i < clientListWidget_->count(); ++i) {
-        QListWidgetItem* item = clientListWidget_->item(i);
-        if (item->text().startsWith(clientId + " ")) {
-            delete clientListWidget_->takeItem(i);
-            break;
-        }
-    }
-
-    // 清理IPv6映射的IPv4地址格式（::ffff:x.x.x.x -> x.x.x.x）
-    QString cleanAddress = address;
-    if (cleanAddress.startsWith("::ffff:")) {
-        cleanAddress = cleanAddress.mid(7);  // 移除前7个字符 "::ffff:"
-    }
-
-    // 添加新条目
-    QString displayText = clientId + " (" + cleanAddress + ")";
-    clientListWidget_->addItem(displayText);
-}
-
-void MainWindow::onClientDisconnected(const QString& clientId) {
-    for (int i = 0; i < clientListWidget_->count(); ++i) {
-        QListWidgetItem* item = clientListWidget_->item(i);
-        if (item->text().startsWith(clientId + " ")) {
-            delete clientListWidget_->takeItem(i);
-            break;
-        }
-    }
 }
 
 void MainWindow::onLogMessage(const QString& message) {

@@ -18,7 +18,7 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 # 查找依赖库
-find_package(Qt5 COMPONENTS Core Widgets Network Concurrent REQUIRED)
+find_package(Qt5 COMPONENTS Core Widgets Network REQUIRED)
 
 # 第三方库 - nlohmann/json (header-only)
 include(FetchContent)
@@ -123,76 +123,12 @@ target_link_libraries(CrossNetShareServer
     PRIVATE Qt5::Network
 )
 
-# 客户端
-if(WIN32)
-    add_executable(CrossNetShareClient WIN32
-        client/main.cpp
-        client/client.cpp
-        client/client.h
-        client/file_manager.cpp
-        client/file_manager.h
-        client/file_indexer.cpp
-        client/file_indexer.h
-        client/ui/main_window.cpp
-        client/ui/main_window.h
-        client/ui/index_settings_dialog.cpp
-        client/ui/index_settings_dialog.h
-        client/client.rc
-    )
-else()
-    add_executable(CrossNetShareClient
-        client/main.cpp
-        client/client.cpp
-        client/client.h
-        client/file_manager.cpp
-        client/file_manager.h
-        client/file_indexer.cpp
-        client/file_indexer.h
-        client/ui/main_window.cpp
-        client/ui/main_window.h
-        client/ui/index_settings_dialog.cpp
-        client/ui/index_settings_dialog.h
-    )
-endif()
-
-target_link_libraries(CrossNetShareClient
-    PRIVATE common
-    PRIVATE Qt5::Core
-    PRIVATE Qt5::Widgets
-    PRIVATE Qt5::Network
-    PRIVATE Qt5::Concurrent
-)
-
 # Windows特定设置
 if(WIN32)
-    # 使用独立的 SQLite C API（不依赖 Qt SQL）
-    # SQLite 文件将通过 GitHub Actions 在构建时下载
-    set(SQLITE3_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/third_party/sqlite")
-    set(SQLITE3_LIBRARY "${CMAKE_SOURCE_DIR}/third_party/sqlite/sqlite3.lib")
-    
-    if(EXISTS "${SQLITE3_INCLUDE_DIR}/sqlite3.h")
-        message(STATUS "Found SQLite headers: ${SQLITE3_INCLUDE_DIR}")
-        target_include_directories(CrossNetShareClient PRIVATE ${SQLITE3_INCLUDE_DIR})
-        
-        if(EXISTS "${SQLITE3_LIBRARY}")
-            message(STATUS "Found SQLite library: ${SQLITE3_LIBRARY}")
-            target_link_libraries(CrossNetShareClient PRIVATE ${SQLITE3_LIBRARY})
-        else()
-            message(WARNING "SQLite library not found at: ${SQLITE3_LIBRARY}")
-            message(WARNING "Build will continue but runtime may fail")
-        endif()
-    else()
-        message(WARNING "SQLite headers not found at: ${SQLITE3_INCLUDE_DIR}")
-        message(WARNING "Please download SQLite from https://www.sqlite.org/download.html")
-        message(WARNING "Build will continue but may fail")
-    endif()
-    
     target_link_libraries(CrossNetShareServer PRIVATE ws2_32)
-    target_link_libraries(CrossNetShareClient PRIVATE ws2_32)
 
     # GUI应用（不显示控制台）
     set_target_properties(CrossNetShareServer PROPERTIES WIN32_EXECUTABLE TRUE)
-    set_target_properties(CrossNetShareClient PROPERTIES WIN32_EXECUTABLE TRUE)
 
     # 部署Qt插件（图像格式插件）
     # 获取Qt安装路径
@@ -244,32 +180,6 @@ if(WIN32)
             "$<TARGET_FILE_DIR:CrossNetShareServer>/h2.jar"
         COMMENT "Copying approval template and H2 jar..."
     )
-    
-    # 复制客户端文本提取脚本
-    add_custom_command(TARGET CrossNetShareClient POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_SOURCE_DIR}/client/extract_pdf_text.py"
-            "$<TARGET_FILE_DIR:CrossNetShareClient>/extract_pdf_text.py"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_SOURCE_DIR}/client/extract_word_text.py"
-            "$<TARGET_FILE_DIR:CrossNetShareClient>/extract_word_text.py"
-        COMMENT "Copying text extraction scripts..."
-    )
-    
-    # 复制 SQLite DLL（用于内容搜索）
-    if(EXISTS "${CMAKE_SOURCE_DIR}/third_party/sqlite/sqlite3.dll")
-        add_custom_command(TARGET CrossNetShareClient POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${CMAKE_SOURCE_DIR}/third_party/sqlite/sqlite3.dll"
-                "$<TARGET_FILE_DIR:CrossNetShareClient>/sqlite3.dll"
-            COMMENT "Copying SQLite DLL..."
-        )
-    else()
-        message(WARNING "sqlite3.dll not found, client will fail to run content search")
-    endif()
-    
-    # 移除旧的 Qt SQL 驱动复制（不再需要）
-    # 现在使用独立的 SQLite 而不是 Qt SQL
     
     # 如果许可证文件存在，复制它
     if(EXISTS "${CMAKE_SOURCE_DIR}/Aspose.Words/python专用whl包/1.lic")

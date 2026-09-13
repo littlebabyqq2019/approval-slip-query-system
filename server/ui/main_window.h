@@ -7,7 +7,6 @@
 #include <QSpinBox>
 #include <QCheckBox>
 #include <QPushButton>
-#include <QListWidget>
 #include <QLabel>
 #include <QTimer>
 #include <QSystemTrayIcon>
@@ -33,13 +32,10 @@ protected:
 
 private slots:
     void onStartStopClicked();
-    void onRefreshIndexClicked();
     void onSelectDatabaseClicked();
     void onRefreshDbClicked();
     void onServerStarted();
     void onServerStopped();
-    void onClientConnected(const QString& clientId, const QString& address);
-    void onClientDisconnected(const QString& clientId);
     void onLogMessage(const QString& message);
     void onServerError(const QString& errorMsg);
     void onCleanupCache();
@@ -64,13 +60,11 @@ private:
     QSpinBox* portSpinBox_;
     QSpinBox* webPortSpinBox_;
     QPushButton* startStopButton_;
-    QPushButton* refreshButton_;
     QPushButton* selectDbButton_;
     QPushButton* refreshDbButton_;
     QLineEdit* dbPathLineEdit_;
     QLabel* dbStatusLabel_;
     QLabel* statusLabel_;
-    QListWidget* clientListWidget_;
     QTextEdit* logTextEdit_;
 
     // 系统托盘
