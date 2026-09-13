@@ -891,90 +891,14 @@ void WebServer::handleFilePreview(QTcpSocket* socket, const HttpRequest& request
         // 记录审计
         AuditLogger::instance()->log(username, AuditAction::PreviewFile,
                                      record.receiveNumber, socket->peerAddress().toString(), true);
-        // 生成HTML表格（仿模板.docx的10行12列表格）
-        auto H = [](const QString& s) { return s.toHtmlEscaped(); };
-        QString html = QString(
-R"HTML(<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><style>
-body{font-family:SimSun,'宋体',serif;background:white;margin:0;padding:24px;color:#000}
-.wrap{max-width:900px;margin:0 auto}
-.title{text-align:center;font-size:24px;font-weight:bold;margin-bottom:8px;letter-spacing:8px}
-.subtitle{text-align:center;font-size:14px;color:#333;margin-bottom:16px}
-table{width:100%;border-collapse:collapse;font-size:14px;table-layout:fixed}
-td{border:1px solid #000;padding:8px 10px;vertical-align:middle;min-height:34px;line-height:1.5;word-wrap:break-word}
-td.label{background:#f9fafb;font-weight:normal;text-align:center;white-space:nowrap;color:#000}
-td.label-thin{background:#f9fafb;font-weight:normal;text-align:center;color:#000}
-.multi-row-label{writing-mode:vertical-rl;letter-spacing:6px;text-align:center}
-.footer{margin-top:20px;font-size:13px;color:#333;line-height:1.6}
-@media print { body { padding: 0; } }
-</style></head><body><div class="wrap">
-<div class="title">收 文 处 理 笺</div>
-<div class="subtitle">（文件批办单）</div>
-<table>
-  <tr>
-    <td class="label" colspan="2" rowspan="1">来文单位</td>
-    <td colspan="10">%1</td>
-  </tr>
-  <tr>
-    <td class="label" colspan="2">来文字号</td>
-    <td colspan="4">%2</td>
-    <td class="label" colspan="2">收文日期</td>
-    <td colspan="4">%3</td>
-  </tr>
-  <tr>
-    <td class="label" colspan="2">来文类型</td>
-    <td colspan="4">%4</td>
-    <td class="label" colspan="2">收文途径</td>
-    <td colspan="4">%5</td>
-  </tr>
-  <tr>
-    <td class="label-thin">紧急程度</td>
-    <td class="label-thin" colspan="1">%6</td>
-    <td class="label-thin">密&nbsp;&nbsp;级</td>
-    <td colspan="2">%7</td>
-    <td colspan="3" class="label">收文编号</td>
-    <td colspan="4"><strong style="color:#b91c1c;font-size:15px">%8</strong></td>
-  </tr>
-  <tr>
-    <td class="label" rowspan="1" colspan="1">文件标题</td>
-    <td colspan="11" style="min-height:56px">%9</td>
-  </tr>
-  <tr>
-    <td class="label" rowspan="1" colspan="1">领导批示</td>
-    <td colspan="11" style="min-height:56px">%10</td>
-  </tr>
-  <tr>
-    <td class="label" rowspan="1" colspan="1">拟办意见</td>
-    <td colspan="11" style="min-height:64px">%11</td>
-  </tr>
-  <tr>
-    <td class="label" rowspan="2" style="width:40px"><span class="multi-row-label">传&nbsp;阅</span></td>
-    <td class="label-thin" colspan="1">姓&nbsp;名</td>
-    <td colspan="10" style="min-height:48px"></td>
-  </tr>
-  <tr>
-    <td class="label-thin" colspan="1">日&nbsp;期</td>
-    <td colspan="10" style="min-height:48px"></td>
-  </tr>
-  <tr>
-    <td class="label" colspan="1">办理结果</td>
-    <td colspan="11" style="min-height:56px">%12</td>
-  </tr>
-</table>
-<div class="footer">备&nbsp;&nbsp;&nbsp;&nbsp;注：%13</div>
-</div></body></html>)HTML")
-            .arg(H(record.department),
-                 H(record.wordCode),
-                 H(record.fileReceiveDate),
-                 H(record.fileCategory),
-                 H(record.receiveChannel),
-                 H(record.emergencyLevel),
-                 H(record.secretLevel),
-                 H(record.receiveNumber),
-                 H(record.summary),
-                 H(record.leaderInstruction),
-                 H(record.suggestion),
-                 H(record.processResult),
-                 H(record.notes));
+        // 使用 Aspose.Words 将填充后的模板转为 HTML，保留模板原始样式
+        QString templatePath = QCoreApplication::applicationDirPath() + "/模板.docx";
+        QString errMsg;
+        QString html = DbManager::instance()->generatePreviewHtml(record, templatePath, errMsg);
+        if (html.isEmpty()) {
+            qWarning() << "[WebServer] generatePreviewHtml failed:" << errMsg;
+            html = QString("<div style='padding:24px;color:#991b1b'>预览生成失败: %1</div>").arg(errMsg.toHtmlEscaped());
+        }
 
         HttpResponse response;
         response.statusCode = 200;
