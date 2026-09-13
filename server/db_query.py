@@ -121,10 +121,16 @@ def parse_table(output):
 
 def compute_receive_number(rows):
     """按 来文类型FILE_CATEGORY + 年份后两位 + 同年同类序号 生成 收文编号 如 A-26-1"""
+    def safe_int(val):
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            return 0
+
     # 先按 FILE_RECEIVE_DATE 升序排序编号
     def sort_key(r):
         date_str = r.get('FILE_RECEIVE_DATE', '') or ''
-        return (date_str, int(r.get('ID', '0') or '0'))
+        return (date_str, safe_int(r.get('ID', '0') or '0'))
 
     # 按 类型+年份 分组编号
     groups = {}
@@ -163,7 +169,12 @@ def cmd_list(db_path):
 
 
 def cmd_get(db_path, record_id):
-    sql = f"SELECT {', '.join(FIELDS)} FROM FILE_DOCUMENT WHERE ID = {int(record_id)};"
+    # ID may be numeric or string; try int first, otherwise quote as string
+    try:
+        id_clause = str(int(record_id))
+    except (ValueError, TypeError):
+        id_clause = f"'{record_id.replace(chr(39), chr(39)+chr(39))}'"
+    sql = f"SELECT {', '.join(FIELDS)} FROM FILE_DOCUMENT WHERE ID = {id_clause};"
     out = run_h2(db_path, sql)
     rows = parse_table(out)
     all_rows = parse_table(run_h2(db_path, f"SELECT {', '.join(FIELDS)} FROM FILE_DOCUMENT ORDER BY ID;"))
