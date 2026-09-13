@@ -17,6 +17,7 @@
 #include <QFileInfo>
 #include <QDebug>
 #include <QProcess>
+#include <QCoreApplication>
 #include <QRegularExpression>
 #include <QTextStream>
 #include <QEventLoop>
