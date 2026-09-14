@@ -740,21 +740,39 @@ QString WatermarkService::extractSuggestionFromWord(const QString& wordFilePath)
         content = QString::fromUtf8(file.readAll());
         file.close();
 
-        // 直接搜索"建议："
-        int suggestionIndex = content.indexOf("建议：");
+        // 提取所有 <w:t> 标签内的文本，拼接为纯文本
+        QString plainText;
+        int searchPos = 0;
+        while (true) {
+            int tStart = content.indexOf("<w:t", searchPos);
+            if (tStart == -1) break;
+            int contentStart = content.indexOf(">", tStart);
+            if (contentStart == -1) break;
+            contentStart += 1;
+            int contentEnd = content.indexOf("</w:t>", contentStart);
+            if (contentEnd == -1) break;
+            plainText += content.mid(contentStart, contentEnd - contentStart);
+            searchPos = contentEnd + 6;
+        }
+        LOG_MESSAGE("Extracted plain text from WordML, length: " + QString::number(plainText.size()));
+
+        // 搜索 "拟办意见" 或 "建议："
+        int suggestionIndex = plainText.indexOf("拟办意见");
         if (suggestionIndex == -1) {
-            LOG_MESSAGE("Warning: No '建议：' found in WordML document");
+            suggestionIndex = plainText.indexOf("建议：");
+        }
+        if (suggestionIndex == -1) {
+            LOG_MESSAGE("Warning: No '拟办意见' or '建议：' found in WordML document");
             return QString();
         }
 
-        // 提取"建议："后的内容（到下一个标签或最多200字符）
         int startPos = suggestionIndex;
-        int endPos = content.indexOf('<', startPos);
-        if (endPos == -1 || endPos - startPos > 500) {
-            endPos = startPos + 200;
+        int endPos = plainText.size();
+        if (endPos - startPos > 500) {
+            endPos = startPos + 500;
         }
 
-        QString suggestion = content.mid(startPos, endPos - startPos).trimmed();
+        QString suggestion = plainText.mid(startPos, endPos - startPos).trimmed();
         LOG_MESSAGE("Extracted from WordML: " + suggestion);
         return suggestion;
     }
@@ -840,23 +858,40 @@ QString WatermarkService::extractSuggestionFromWord(const QString& wordFilePath)
         xmlFile.close();
         LOG_MESSAGE("Read document.xml, size: " + QString::number(content.size()) + " chars");
 
-        // 搜索"建议："
-        int suggestionIndex = content.indexOf("建议：");
+        // 提取所有 <w:t> 标签内的文本，拼接为纯文本
+        QString plainText;
+        int searchPos = 0;
+        while (true) {
+            int tStart = content.indexOf("<w:t", searchPos);
+            if (tStart == -1) break;
+            int contentStart = content.indexOf(">", tStart);
+            if (contentStart == -1) break;
+            contentStart += 1;
+            int contentEnd = content.indexOf("</w:t>", contentStart);
+            if (contentEnd == -1) break;
+            plainText += content.mid(contentStart, contentEnd - contentStart);
+            searchPos = contentEnd + 6;
+        }
+        LOG_MESSAGE("Extracted plain text from docx, length: " + QString::number(plainText.size()));
+
+        // 搜索 "拟办意见" 或 "建议："
+        int suggestionIndex = plainText.indexOf("拟办意见");
         if (suggestionIndex == -1) {
-            LOG_MESSAGE("Warning: No '建议：' found in docx document");
+            suggestionIndex = plainText.indexOf("建议：");
+        }
+        if (suggestionIndex == -1) {
+            LOG_MESSAGE("Warning: No '拟办意见' or '建议：' found in docx document");
             return QString();
         }
 
-        LOG_MESSAGE("Found '建议：' at position " + QString::number(suggestionIndex));
-
-        // 提取"建议："后的内容
+        // 提取标签后的内容（最多500字符）
         int startPos = suggestionIndex;
-        int endPos = content.indexOf('<', startPos);
-        if (endPos == -1 || endPos - startPos > 500) {
-            endPos = startPos + 200;
+        int endPos = plainText.size();
+        if (endPos - startPos > 500) {
+            endPos = startPos + 500;
         }
 
-        QString suggestion = content.mid(startPos, endPos - startPos).trimmed();
+        QString suggestion = plainText.mid(startPos, endPos - startPos).trimmed();
         LOG_MESSAGE("Extracted from docx: " + suggestion);
         return suggestion;
     }

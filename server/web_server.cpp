@@ -1246,9 +1246,9 @@ void WebServer::handleWatermarkGenerate(QTcpSocket* socket, const HttpRequest& r
         // 创建临时目录用于水印处理
         QString tempDir = QDir::tempPath() + "/crossnet_wm_approval_" + QString::number(QDateTime::currentMSecsSinceEpoch());
         QDir().mkpath(tempDir);
-        QString tempPdfPath = tempDir + "/" + record.receiveNumber + ".pdf";
-        QFile::copy(outPdf, tempPdfPath);
-        processWatermarkGeneration(socket, tempDir, tempPdfPath, username);
+        QString tempDocxPath = tempDir + "/" + record.receiveNumber + ".docx";
+        QFile::copy(outDocx, tempDocxPath);
+        processWatermarkGeneration(socket, tempDir, tempDocxPath, username);
         return;
     }
 
