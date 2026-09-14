@@ -515,6 +515,10 @@ void MainWindow::onAddRemoteDatabaseClicked() {
         return;
     }
 
+    if (!remotePath.startsWith("/")) {
+        remotePath = "/" + remotePath;
+    }
+
     QString connStr;
     if (!password.isEmpty()) {
         connStr = QString("tcp://%1:%2@%3:%4%5").arg(user, password, ip).arg(port).arg(remotePath);

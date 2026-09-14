@@ -51,6 +51,8 @@ def parse_remote_url(db_path):
             user, password = creds.split(":", 1)
         else:
             user = creds
+    # Ensure path starts with / after port (fix missing slash in older configs)
+    rest = re.sub(r'(:\d+)([^/])', r'\1/\2', rest)
     return f"tcp://{rest}", user, password
 
 
@@ -138,13 +140,14 @@ def run_h2(db_path, sql):
     env['JAVA_TOOL_OPTIONS'] = '-Dfile.encoding=UTF-8'
     result = subprocess.run(cmd, capture_output=True, cwd=os.path.dirname(H2_JAR), env=env)
     raw = result.stdout
+    err_text = result.stderr.decode('utf-8', errors='replace')
     # Try UTF-8 first; if replacement chars appear, fall back to GBK (Windows Chinese default)
     text = raw.decode('utf-8', errors='replace')
     if '\ufffd' in text:
         gbk_text = raw.decode('gbk', errors='replace')
         if '\ufffd' not in gbk_text:
-            return gbk_text
-    return text
+            return gbk_text, err_text
+    return text, err_text
 
 
 def parse_table(output):
@@ -262,10 +265,20 @@ def cmd_list(db_path):
         rows = run_sqlite(db_path)
     else:
         sql = f"SELECT {sql_select(FIELDS)} FROM FILE_DOCUMENT ORDER BY ID;"
-        out = run_h2(db_path, sql)
+        out, err = run_h2(db_path, sql)
+        if err and not out.strip():
+            print(json.dumps({"success": False, "error": err.strip()[:500]}, ensure_ascii=False))
+            return
         rows = parse_table(out)
         rows = restore_newlines(rows)
         rows = compute_receive_number(rows)
+        if not rows:
+            # Debug: list available tables
+            dbg_out, dbg_err = run_h2(db_path, "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA='PUBLIC';")
+            dbg_tables = parse_table(dbg_out)
+            table_names = [t.get('TABLE_NAME', '') for t in dbg_tables]
+            print(json.dumps({"success": True, "records": [], "debug": "No rows from FILE_DOCUMENT. Available tables: " + str(table_names) + " stderr: " + err.strip()[:200]}, ensure_ascii=False, indent=2))
+            return
     rows.sort(key=lambda r: r.get('RECEIVE_NUMBER', ''), reverse=True)
     print(json.dumps({"success": True, "records": rows}, ensure_ascii=False, indent=2))
 
@@ -275,7 +288,7 @@ def cmd_get(db_path, record_id):
         all_rows = run_sqlite(db_path)
     else:
         sql = f"SELECT {sql_select(FIELDS)} FROM FILE_DOCUMENT ORDER BY ID;"
-        out = run_h2(db_path, sql)
+        out, err = run_h2(db_path, sql)
         all_rows = parse_table(out)
         all_rows = restore_newlines(all_rows)
         all_rows = compute_receive_number(all_rows)
@@ -291,7 +304,7 @@ def cmd_search(db_path, keyword):
         rows = run_sqlite(db_path)
     else:
         sql = f"SELECT {sql_select(FIELDS)} FROM FILE_DOCUMENT ORDER BY ID;"
-        out = run_h2(db_path, sql)
+        out, err = run_h2(db_path, sql)
         rows = parse_table(out)
         rows = restore_newlines(rows)
         rows = compute_receive_number(rows)
