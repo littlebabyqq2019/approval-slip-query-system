@@ -52,7 +52,7 @@ void WebServer::handleContentSearch(QTcpSocket* socket, const HttpRequest& reque
     nlohmann::json responseData;
     responseData["success"] = false;
     responseData["query"] = query;
-    responseData["message"] = "Content search is only available in the desktop client application. Please download and use the CrossNetShare client to search file contents.";
+    responseData["message"] = "Content search is only available in the desktop client application. Please download and use the client to search file contents.";
     responseData["feature_available"] = "client_only";
     responseData["results"] = nlohmann::json::array();
     

@@ -744,7 +744,12 @@ QString WatermarkService::extractSuggestionFromWord(const QString& wordFilePath)
         QString plainText;
         int searchPos = 0;
         while (true) {
-            int tStart = content.indexOf("<w:t", searchPos);
+            int t1 = content.indexOf("<w:t>", searchPos);
+            int t2 = content.indexOf("<w:t ", searchPos);
+            int tStart = -1;
+            if (t1 != -1 && t2 != -1) tStart = (t1 < t2) ? t1 : t2;
+            else if (t1 != -1) tStart = t1;
+            else if (t2 != -1) tStart = t2;
             if (tStart == -1) break;
             int contentStart = content.indexOf(">", tStart);
             if (contentStart == -1) break;
@@ -862,7 +867,12 @@ QString WatermarkService::extractSuggestionFromWord(const QString& wordFilePath)
         QString plainText;
         int searchPos = 0;
         while (true) {
-            int tStart = content.indexOf("<w:t", searchPos);
+            int t1 = content.indexOf("<w:t>", searchPos);
+            int t2 = content.indexOf("<w:t ", searchPos);
+            int tStart = -1;
+            if (t1 != -1 && t2 != -1) tStart = (t1 < t2) ? t1 : t2;
+            else if (t1 != -1) tStart = t1;
+            else if (t2 != -1) tStart = t2;
             if (tStart == -1) break;
             int contentStart = content.indexOf(">", tStart);
             if (contentStart == -1) break;

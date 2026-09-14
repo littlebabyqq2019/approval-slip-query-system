@@ -394,7 +394,7 @@ void WatermarkSettingsDialog::onDetectLibreOfficeClicked() {
                     "2. 安装到系统（建议默认路径）\n"
                     "3. 将 LibreOffice 安装目录添加到系统 PATH 环境变量\n"
                     "   例如: C:\\Program Files\\LibreOffice\\program\n"
-                    "4. 重启 CrossNetShare 服务器\n\n"
+                    "4. 重启批办单查询系统服务器\n\n"
                     "没有 LibreOffice，水印功能将无法使用。")
             .arg(possibleCommands.join(", ")));
     }
