@@ -1091,7 +1091,7 @@ const clients = [...new Set(files.map(f => f.ownerClient))].sort(); const select
           : '<div class="name">' + escapeHtml(f.filename) + badge + '</div>' + '<div class="meta">' + escapeHtml(f.ownerClient) + ' · ' + escapeHtml(f.relativePath) + ' · ' + escapeHtml(f.humanSize || '') + '</div>' + '<div class="meta">创建时间：' + escapeHtml(f.createTime || f.modifyTime || '') + '</div>'; div.appendChild(content); listEl.appendChild(div); } updateBatchButton(); } function toggleSelect(id) { if (selectedIds.has(id)) selectedIds.delete(id); else selectedIds.add(id); updateBatchButton(); document.getElementById('selectAll').checked = selectedIds.size === files.length; } function toggleSelectAll() { const checked = document.getElementById('selectAll').checked; if (checked) { files.forEach(f => selectedIds.add(f.id)); } else { selectedIds.clear(); } render(); } function updateBatchButton() { const btn = document.getElementById('batchDownloadBtn'); btn.disabled = selectedIds.size === 0; btn.textContent = '批量下载' + (selectedIds.size > 0 ? ' (' + selectedIds.size + ')' : ''); } function selectByDate() { const dateFrom = document.getElementById('dateFrom').value; if (!dateFrom) { alert('请选择起始日期'); return; } const fromTime = new Date(dateFrom).getTime(); selectedIds.clear(); files.forEach(f => { const ds = isApprovalMode ? (f.fileReceiveDate || f.createTime) : f.createTime; const ct = new Date(ds).getTime(); if (ct >= fromTime) selectedIds.add(f.id); }); render(); } function clearDateFilter() { document.getElementById('dateFrom').value = ''; selectedIds.clear(); render(); } function selectFile(f, el) { selected = f; document.querySelectorAll('.item').forEach(x => x.classList.remove('active')); el.classList.add('active'); document.getElementById('title').textContent = f.filename; const downloadBtn = document.getElementById('download'); if (downloadBtn && userPermissions.downloadFile) { downloadBtn.style.display = 'inline-block'; } const printBtn = document.getElementById('printBtn'); if (printBtn && userPermissions.printFile) { printBtn.style.display = 'inline-block'; } const watermarkBtn = document.getElementById('watermarkBtn'); if (watermarkBtn) {
 const isWordDoc = f.filename.toLowerCase().endsWith('.doc') || f.filename.toLowerCase().endsWith('.docx');
 const isApprovalDoc = isApprovalMode;
-if ((isWordDoc || isApprovalDoc) && userPermissions.watermarkExport && watermarkEnabled) {
+if ((isWordDoc || isApprovalDoc) && userPermissions.watermarkExport && (watermarkEnabled || isApprovalMode)) {
 watermarkBtn.style.display = 'inline-block';
 }
 else {
@@ -1189,18 +1189,6 @@ void WebServer::handleWatermarkGenerate(QTcpSocket* socket, const HttpRequest& r
         return;
     }
 
-    // 检查水印功能是否启用
-    qDebug() << "[Watermark] Watermark service config enabled:" << watermarkService_->getConfig().enabled;
-    if (!watermarkService_->getConfig().enabled) {
-        qDebug() << "[Watermark] Error: Watermark feature is disabled in config";
-        response.statusCode = 403;
-        response.statusText = "Forbidden";
-        response.headers["Content-Type"] = "application/json; charset=utf-8";
-        response.body = R"({"success":false,"error":"水印功能未启用"})";
-        sendResponse(socket, response);
-        return;
-    }
-
     qDebug() << "[Watermark] Starting watermark generation request";
 
     // 解析请求参数
@@ -1219,6 +1207,18 @@ void WebServer::handleWatermarkGenerate(QTcpSocket* socket, const HttpRequest& r
     QString clientId = obj["clientId"].toString();
     bool isApproval = obj["isApproval"].toBool();
     QString approvalId = obj["id"].toString();
+
+    // 检查水印功能是否启用（批办单模式跳过此检查）
+    qDebug() << "[Watermark] Watermark service config enabled:" << watermarkService_->getConfig().enabled;
+    if (!isApproval && !watermarkService_->getConfig().enabled) {
+        qDebug() << "[Watermark] Error: Watermark feature is disabled in config";
+        response.statusCode = 403;
+        response.statusText = "Forbidden";
+        response.headers["Content-Type"] = "application/json; charset=utf-8";
+        response.body = R"({"success":false,"error":"水印功能未启用"})";
+        sendResponse(socket, response);
+        return;
+    }
 
     // ===== 批办单模式：从数据库生成 PDF，再加水印 =====
     if (isApproval && !approvalId.isEmpty() && DbManager::instance()->isDatabaseLoaded()) {

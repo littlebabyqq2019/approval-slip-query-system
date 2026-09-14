@@ -411,27 +411,39 @@ void MainWindow::onSettingsClicked() {
 }
 
 void MainWindow::onSelectDatabaseClicked() {
-    QString fileName = QFileDialog::getOpenFileName(
+    QStringList fileNames = QFileDialog::getOpenFileNames(
         this,
-        "选择 H2 数据库文件",
+        "选择 H2 数据库文件（可多选）",
         QDir::homePath(),
         "H2 数据库文件 (*.mv.db);;所有文件 (*.*)"
     );
-    if (fileName.isEmpty()) {
+    if (fileNames.isEmpty()) {
         return;
     }
-    QString basePath = fileName;
-    if (basePath.endsWith(".mv.db", Qt::CaseInsensitive)) {
-        basePath.chop(6);
-    } else if (basePath.endsWith(".trace.db", Qt::CaseInsensitive)) {
-        basePath.chop(9);
+
+    QStringList basePaths;
+    for (const QString& fileName : fileNames) {
+        QString basePath = fileName;
+        if (basePath.endsWith(".mv.db", Qt::CaseInsensitive)) {
+            basePath.chop(6);
+        } else if (basePath.endsWith(".trace.db", Qt::CaseInsensitive)) {
+            basePath.chop(9);
+        }
+        basePaths.append(basePath);
     }
-    dbPathLineEdit_->setText(QDir::toNativeSeparators(basePath));
-    appendLog("选择数据库文件: " + basePath);
-    bool ok = DbManager::instance()->setDatabasePath(basePath);
+
+    for (const QString& basePath : basePaths) {
+        DbManager::instance()->addDatabase(basePath);
+        appendLog("添加数据库文件: " + basePath);
+    }
+
+    // Set the last selected as active
+    QString activePath = basePaths.last();
+    dbPathLineEdit_->setText(QDir::toNativeSeparators(activePath));
+    bool ok = DbManager::instance()->setActiveDatabase(activePath);
     if (ok) {
         int count = DbManager::instance()->getAllRecords().size();
-        dbStatusLabel_->setText(QString("数据库已加载: %1 (共 %2 条记录)").arg(QDir::toNativeSeparators(basePath)).arg(count));
+        dbStatusLabel_->setText(QString("数据库已加载: %1 (共 %2 条记录)").arg(QDir::toNativeSeparators(activePath)).arg(count));
         dbStatusLabel_->setStyleSheet("font-size: 9pt; color: #166534; padding: 4px 10px; background-color: #dcfce7; border-radius: 4px;");
         saveDatabaseConfig();
     } else {
@@ -446,7 +458,11 @@ void MainWindow::onRefreshDbClicked() {
         QMessageBox::information(this, "提示", "请先选择数据库文件");
         return;
     }
-    bool ok = DbManager::instance()->setDatabasePath(QDir::fromNativeSeparators(path));
+    QString normPath = QDir::fromNativeSeparators(path);
+    if (!DbManager::instance()->getDatabaseList().contains(normPath)) {
+        DbManager::instance()->addDatabase(normPath);
+    }
+    bool ok = DbManager::instance()->setActiveDatabase(normPath);
     if (ok) {
         appendLog("数据库刷新成功");
         int count = DbManager::instance()->getAllRecords().size();

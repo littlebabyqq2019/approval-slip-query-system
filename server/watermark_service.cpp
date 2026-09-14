@@ -203,12 +203,6 @@ WatermarkService::WatermarkResult WatermarkService::generateWatermarkedImages(
 {
     WatermarkResult result;
 
-    // 检查功能是否启用
-    if (!config_.enabled) {
-        result.error = "Watermark feature is disabled";
-        return result;
-    }
-
     emit progress("开始处理文档...", 1, 5);
     LOG_MESSAGE("Processing: " + wordFilePath);
 
