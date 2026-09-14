@@ -171,15 +171,22 @@ if(WIN32)
     )
 
     # 复制批办单模板和 H2 数据库 jar
-    add_custom_command(TARGET ApprovalSlipQueryServer POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_SOURCE_DIR}/模板.docx"
-            "$<TARGET_FILE_DIR:ApprovalSlipQueryServer>/模板.docx"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_SOURCE_DIR}/h2.jar"
-            "$<TARGET_FILE_DIR:ApprovalSlipQueryServer>/h2.jar"
-        COMMENT "Copying approval template and H2 jar..."
-    )
+    if(EXISTS "${CMAKE_SOURCE_DIR}/模板.docx")
+        add_custom_command(TARGET ApprovalSlipQueryServer POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_SOURCE_DIR}/模板.docx"
+                "$<TARGET_FILE_DIR:ApprovalSlipQueryServer>/模板.docx"
+            COMMENT "Copying approval template..."
+        )
+    endif()
+    if(EXISTS "${CMAKE_SOURCE_DIR}/h2.jar")
+        add_custom_command(TARGET ApprovalSlipQueryServer POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_SOURCE_DIR}/h2.jar"
+                "$<TARGET_FILE_DIR:ApprovalSlipQueryServer>/h2.jar"
+            COMMENT "Copying H2 jar..."
+        )
+    endif()
 
     # 如果许可证文件存在，复制它
     if(EXISTS "${CMAKE_SOURCE_DIR}/Aspose.Words/python专用whl包/1.lic")
