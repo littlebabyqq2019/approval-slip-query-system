@@ -79,82 +79,88 @@ def find_span_cell_by_first_label(table, row_idx, first_label):
 
 
 def set_cell_text(cell, text, table=None, row_idx=None):
-    """设置单元格文本，保留模板原有格式。
-    
-    当目标单元格已有run时，保留第一个run的格式属性，仅替换文字。
-    当目标单元格为空（无run）时，从同一行的非空单元格（通常是标签单元格）
-    复制字体、字号、颜色等格式属性，确保填充文字与模板格式一致。
+    """设置单元格文本，使用仿宋-GB2312字体，四号(14pt)。
+
+    支持多行文本：按换行符分割为多个段落，第二段及之后添加首行缩进2字符。
     """
     if cell is None:
         return
     text = text or ''
     if not cell.paragraphs:
-        cell.add_paragraph(text)
+        cell.add_paragraph()
         return
 
     first_para = cell.paragraphs[0]
+    lines = text.split('\n') if text else ['']
+
+    for run in first_para.runs:
+        run.text = ''
+
     if first_para.runs:
-        # 单元格已有run：保留第一个run的格式，仅替换文字
-        for run in first_para.runs:
-            run.text = ''
         first_run = first_para.runs[0]
-        first_run.text = text
-        # 强制黑色、非粗体、非斜体（内容文字不应为红色或粗体）
-        try:
-            from docx.shared import RGBColor
-            first_run.font.color.rgb = RGBColor(0, 0, 0)
-        except Exception:
-            pass
-        try:
-            first_run.font.bold = False
-        except Exception:
-            pass
-        try:
-            first_run.font.italic = False
-        except Exception:
-            pass
     else:
-        # 单元格为空：从同一行非空单元格复制格式
-        ref_run = None
-        if table is not None and row_idx is not None:
-            for c in table.rows[row_idx].cells:
-                if c is cell:
-                    continue
-                if c.paragraphs and c.paragraphs[0].runs:
-                    ref_run = c.paragraphs[0].runs[0]
-                    break
-        new_run = first_para.add_run(text)
-        if ref_run is not None:
-            _copy_run_format(ref_run, new_run)
+        first_run = first_para.add_run()
+    first_run.text = lines[0]
+    _apply_content_font(first_run)
+
+    while len(cell.paragraphs) > len(lines):
+        p = cell.paragraphs[-1]
+        p._element.getparent().remove(p._element)
+
+    for i, line in enumerate(lines[1:], 1):
+        if i < len(cell.paragraphs):
+            para = cell.paragraphs[i]
+            for run in para.runs:
+                run.text = ''
+        else:
+            para = cell.add_paragraph()
+        if para.runs:
+            run = para.runs[0]
+        else:
+            run = para.add_run()
+        run.text = line
+        _apply_content_font(run)
+        _apply_indent(para)
 
 
-def _copy_run_format(src_run, dst_run):
-    """从 src_run 复制字体名和字号到 dst_run。
-    颜色强制为黑色，粗体/斜体强制为非粗体/非斜体，
-    因为填充的是内容文字，不应继承标签单元格的红色或粗体样式。
-    """
+def _apply_indent(para):
+    """Set first-line indent of 2 Chinese characters (2 * 14pt = 28pt)."""
     try:
-        if src_run.font.name:
-            dst_run.font.name = src_run.font.name
+        from docx.shared import Pt
+        para.paragraph_format.first_line_indent = Pt(28)
+    except Exception:
+        pass
+
+
+def _apply_content_font(run):
+    """Apply 仿宋-GB2312 font, 四号(14pt), black, non-bold, non-italic."""
+    try:
+        run.font.name = '仿宋-GB2312'
+        from docx.oxml.ns import qn
+        rPr = run._element.get_or_add_rPr()
+        rFonts = rPr.find(qn('w:rFonts'))
+        if rFonts is None:
+            rFonts = rPr.makeelement(qn('w:rFonts'), {})
+            rPr.insert(0, rFonts)
+        rFonts.set(qn('w:eastAsia'), '仿宋-GB2312')
     except Exception:
         pass
     try:
-        if src_run.font.size:
-            dst_run.font.size = src_run.font.size
+        from docx.shared import Pt
+        run.font.size = Pt(14)
     except Exception:
         pass
-    # 强制黑色、非粗体、非斜体
     try:
         from docx.shared import RGBColor
-        dst_run.font.color.rgb = RGBColor(0, 0, 0)
+        run.font.color.rgb = RGBColor(0, 0, 0)
     except Exception:
         pass
     try:
-        dst_run.font.bold = False
+        run.font.bold = False
     except Exception:
         pass
     try:
-        dst_run.font.italic = False
+        run.font.italic = False
     except Exception:
         pass
 

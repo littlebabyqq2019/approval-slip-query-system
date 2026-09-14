@@ -145,7 +145,11 @@ bool DbManager::setDatabasePath(const QString& dbBasePath) {
         emit error("找不到数据库文件: " + mvDb);
         return false;
     }
-    dbBasePath_ = dbBasePath;
+    activeDbPath_ = dbBasePath;
+    if (!databasePaths_.contains(dbBasePath)) {
+        databasePaths_.append(dbBasePath);
+        emit databaseListChanged();
+    }
     lock.unlock();
     bool ok = refresh();
     if (ok) {
@@ -154,9 +158,69 @@ bool DbManager::setDatabasePath(const QString& dbBasePath) {
     return ok;
 }
 
+bool DbManager::addDatabase(const QString& dbBasePath) {
+    QString mvDb = dbBasePath + ".mv.db";
+    if (!QFileInfo::exists(mvDb)) {
+        emit error("找不到数据库文件: " + mvDb);
+        return false;
+    }
+    QMutexLocker lock(&mutex_);
+    if (!databasePaths_.contains(dbBasePath)) {
+        databasePaths_.append(dbBasePath);
+        emit databaseListChanged();
+    }
+    if (activeDbPath_.isEmpty()) {
+        activeDbPath_ = dbBasePath;
+        lock.unlock();
+        if (refresh()) emit databaseChanged();
+        return true;
+    }
+    return true;
+}
+
+bool DbManager::removeDatabase(const QString& dbBasePath) {
+    QMutexLocker lock(&mutex_);
+    databasePaths_.removeAll(dbBasePath);
+    if (activeDbPath_ == dbBasePath) {
+        activeDbPath_.clear();
+        records_.clear();
+        if (!databasePaths_.isEmpty()) {
+            activeDbPath_ = databasePaths_.first();
+            lock.unlock();
+            if (refresh()) emit databaseChanged();
+        } else {
+            emit databaseChanged();
+        }
+    }
+    emit databaseListChanged();
+    return true;
+}
+
+QStringList DbManager::getDatabaseList() const {
+    QMutexLocker lock(&mutex_);
+    return databasePaths_;
+}
+
+bool DbManager::setActiveDatabase(const QString& dbBasePath) {
+    QMutexLocker lock(&mutex_);
+    if (!databasePaths_.contains(dbBasePath)) {
+        return false;
+    }
+    activeDbPath_ = dbBasePath;
+    lock.unlock();
+    bool ok = refresh();
+    if (ok) emit databaseChanged();
+    return ok;
+}
+
+QString DbManager::getActiveDatabase() const {
+    QMutexLocker lock(&mutex_);
+    return activeDbPath_;
+}
+
 bool DbManager::refresh() {
     QMutexLocker lock(&mutex_);
-    if (dbBasePath_.isEmpty()) {
+    if (activeDbPath_.isEmpty()) {
         return false;
     }
     QString appDir = findAppDir();
@@ -171,7 +235,7 @@ bool DbManager::refresh() {
     }
     QString errStr;
     QStringList args;
-    args << script << dbBasePath_ << "list";
+    args << script << activeDbPath_ << "list";
     auto result = runPythonJson(args, errStr);
     if (result.isEmpty()) {
         qWarning() << "[DbManager] refresh failed:" << errStr;
@@ -195,7 +259,7 @@ QList<ApprovalRecord> DbManager::getAllRecords() const {
 
 QList<ApprovalRecord> DbManager::searchRecords(const QString& keyword) const {
     QMutexLocker lock(&mutex_);
-    if (dbBasePath_.isEmpty()) {
+    if (activeDbPath_.isEmpty()) {
         return {};
     }
     // 使用脚本搜索
@@ -207,7 +271,7 @@ QList<ApprovalRecord> DbManager::searchRecords(const QString& keyword) const {
     QString errStr;
     lock.unlock();
     QStringList args;
-    args << script << dbBasePath_ << "search" << keyword;
+    args << script << activeDbPath_ << "search" << keyword;
     auto result = runPythonJson(args, errStr);
     if (result.isEmpty()) {
         return {};
@@ -226,7 +290,7 @@ bool DbManager::getRecordById(const QString& id, ApprovalRecord& outRecord) cons
         }
     }
     // 找不到时再通过脚本查询
-    if (dbBasePath_.isEmpty()) return false;
+    if (activeDbPath_.isEmpty()) return false;
     QString appDir = findAppDir();
     QString script = appDir + "/db_query.py";
     if (!QFileInfo::exists(script)) {
@@ -235,7 +299,7 @@ bool DbManager::getRecordById(const QString& id, ApprovalRecord& outRecord) cons
     QString errStr;
     lock.unlock();
     QStringList args;
-    args << script << dbBasePath_ << "get" << id;
+    args << script << activeDbPath_ << "get" << id;
     auto result = runPythonJson(args, errStr);
     if (result.isEmpty()) return false;
     QJsonParseError perr;

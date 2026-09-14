@@ -394,7 +394,11 @@ WatermarkService::WatermarkResult WatermarkService::generateWatermarkedImages(
 
     // 7. 清理临时文件
     QFile::remove(pdfPath);
-    QFile::remove(baseImagePath);
+    // Only remove baseImagePath if it's not one of the generated images
+    // (when no watermark is added, the generated image IS the base image)
+    if (!generatedImages.contains(baseImagePath)) {
+        QFile::remove(baseImagePath);
+    }
     if (config_.zipDownload) {
         // ZIP模式：打包后删除临时图片
         for (const QString& imagePath : generatedImages) {

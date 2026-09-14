@@ -45,6 +45,8 @@ private slots:
     void onQuitApp();
     void onDbManagerError(const QString& msg);
     void onDbDatabaseChanged();
+    void saveDatabaseConfig();
+    void loadDatabaseConfig();
 
 private:
     void setupUi();

@@ -43,6 +43,8 @@ void customMessageHandler(QtMsgType type, const QMessageLogContext &context, con
 
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
+    app.setApplicationName("ApprovalSlipQueryServer");
+    app.setOrganizationName("ApprovalSlipQuerySystem");
 
     // Install custom message handler
     qInstallMessageHandler(customMessageHandler);

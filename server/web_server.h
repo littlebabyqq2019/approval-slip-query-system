@@ -71,6 +71,8 @@ private:
     void handleLogin(QTcpSocket* socket, const HttpRequest& request);
     void handleLogout(QTcpSocket* socket, const HttpRequest& request);
     void handleUserInfo(QTcpSocket* socket, const HttpRequest& request);
+    void handleDatabaseList(QTcpSocket* socket, const HttpRequest& request);
+    void handleDatabaseSelect(QTcpSocket* socket, const HttpRequest& request);
     void handleFileList(QTcpSocket* socket, const HttpRequest& request);
     void handleFileSearch(QTcpSocket* socket, const HttpRequest& request);
     void handleFileDownload(QTcpSocket* socket, const HttpRequest& request);

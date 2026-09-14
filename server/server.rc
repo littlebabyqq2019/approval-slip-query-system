@@ -16,14 +16,14 @@ BEGIN
     BEGIN
         BLOCK "080404b0"
         BEGIN
-            VALUE "CompanyName", "CrossNetShare"
-            VALUE "FileDescription", "CrossNetShare Server - 跨网络文件共享服务器"
-            VALUE "FileVersion", "1.2.0.0"
-            VALUE "InternalName", "CrossNetShareServer"
+            VALUE "CompanyName", "ApprovalSlipQuerySystem"
+            VALUE "FileDescription", "批办单查询系统"
+            VALUE "FileVersion", "2.3.0.0"
+            VALUE "InternalName", "ApprovalSlipQueryServer"
             VALUE "LegalCopyright", "Copyright (C) 2026"
-            VALUE "OriginalFilename", "CrossNetShareServer.exe"
-            VALUE "ProductName", "CrossNetShare"
-            VALUE "ProductVersion", "1.2.0"
+            VALUE "OriginalFilename", "ApprovalSlipQueryServer.exe"
+            VALUE "ProductName", "批办单查询系统"
+            VALUE "ProductVersion", "2.3.0"
         END
     END
     BLOCK "VarFileInfo"

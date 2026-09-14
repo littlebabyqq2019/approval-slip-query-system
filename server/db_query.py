@@ -61,8 +61,8 @@ def parse_table(output):
       COL1 | COL2 | COL3
       val1 | val2 | val3
       (N rows, X ms)
-    No separator line, so we detect header by first line containing '|'
-    and data rows until '(N rows' line.
+    Splits each line by pipe independently — H2 Shell adjusts column widths
+    mid-output, so fixed header pipe positions don't work.
     """
     lines = output.strip().split("\n")
     if not lines:
@@ -77,20 +77,8 @@ def parse_table(output):
     if header_idx is None:
         return []
 
-    header_line = lines[header_idx]
-    # Parse headers by pipe positions
-    pipe_positions = [i for i, c in enumerate(header_line) if c == '|']
-    cols = []
-    for k in range(len(pipe_positions) + 1):
-        if k == 0:
-            start = 0
-        else:
-            start = pipe_positions[k - 1] + 1
-        if k < len(pipe_positions):
-            end = pipe_positions[k]
-        else:
-            end = len(header_line)
-        cols.append(header_line[start:end].strip())
+    cols = [c.strip() for c in lines[header_idx].split('|')]
+    n_cols = len(cols)
 
     rows = []
     for j in range(header_idx + 1, len(lines)):
@@ -101,29 +89,46 @@ def parse_table(output):
             continue
         if '|' not in line:
             continue
-        # Split by pipe positions from header
-        values = []
-        for k in range(len(pipe_positions) + 1):
-            if k == 0:
-                start = 0
-            else:
-                start = pipe_positions[k - 1] + 1
-            if k < len(pipe_positions):
-                end = pipe_positions[k]
-            else:
-                end = len(line)
-            values.append(line[start:end].strip())
-        if len(values) == len(cols):
-            row = {cols[k]: values[k] for k in range(len(cols))}
+        values = [v.strip() for v in line.split('|')]
+        if len(values) == n_cols:
+            row = {cols[k]: values[k] for k in range(n_cols)}
             rows.append(row)
     return rows
 
 
 def compute_receive_number(rows):
-    """使用数据库唯一ID生成收文编号: 批办单#ID"""
+    """生成收文编号: {FILE_CATEGORY}-{YY}-{sequence}
+    YY = 年份后两位 (from FILE_RECEIVE_DATE)
+    sequence = 该类型在该年份的排序 (ordered by FILE_RECEIVE_DATE, then ID)
+    Fallback: 批办单#ID if FILE_CATEGORY is empty
+    """
+    from collections import defaultdict
+
+    # Group records by (category, year) and assign sequence numbers
+    groups = defaultdict(list)
     for r in rows:
-        rid = r.get('ID', '') or ''
-        r['RECEIVE_NUMBER'] = f"批办单#{rid}"
+        cat = (r.get('FILE_CATEGORY', '') or '').strip()
+        date = (r.get('FILE_RECEIVE_DATE', '') or '').strip()
+        if date == 'null' or not date:
+            date = (r.get('CREATE_TIME', '') or '').strip()
+        year = date[:4] if len(date) >= 4 and date[:4].isdigit() else ''
+        if cat and year:
+            groups[(cat, year)].append(r)
+
+    # Sort each group by FILE_RECEIVE_DATE then ID, assign sequence
+    for key, group in groups.items():
+        group.sort(key=lambda r: (
+            r.get('FILE_RECEIVE_DATE', '') or '',
+            r.get('ID', '') or ''
+        ))
+        for i, r in enumerate(group, 1):
+            r['RECEIVE_NUMBER'] = f"{key[0]}-{key[1][2:]}-{i}"
+
+    # Fallback for records without category or date
+    for r in rows:
+        if 'RECEIVE_NUMBER' not in r or not r['RECEIVE_NUMBER']:
+            rid = r.get('ID', '') or ''
+            r['RECEIVE_NUMBER'] = f"批办单#{rid}"
     return rows
 
 
@@ -135,29 +140,53 @@ FIELDS = [
     "SECRET_LEVEL", "SUGGESTION", "SUMMARY", "WORD_CODE"
 ]
 
+NL_PLACEHOLDER = '\u00b6'  # ¶ pilcrow — unlikely in government document data
+
+
+def sql_select(fields):
+    """Build SELECT clause with REPLACE to convert newlines to placeholder.
+    H2 Shell outputs multi-line values as separate lines, breaking parse_table.
+    We replace CHAR(10)/CHAR(13) with a placeholder char, then restore after parsing.
+    """
+    parts = []
+    for f in fields:
+        parts.append(
+            f"REPLACE(REPLACE({f}, CHAR(10), CHAR(182)), CHAR(13), CHAR(182)) AS {f}"
+        )
+    return ', '.join(parts)
+
+
+def restore_newlines(rows):
+    """Restore newlines from pilcrow placeholder after parse_table."""
+    for r in rows:
+        for k, v in r.items():
+            if v and NL_PLACEHOLDER in v:
+                r[k] = v.replace(NL_PLACEHOLDER, '\n')
+    return rows
+
 
 def cmd_list(db_path):
-    sql = f"SELECT {', '.join(FIELDS)} FROM FILE_DOCUMENT ORDER BY ID;"
+    sql = f"SELECT {sql_select(FIELDS)} FROM FILE_DOCUMENT ORDER BY ID;"
     out = run_h2(db_path, sql)
     rows = parse_table(out)
+    rows = restore_newlines(rows)
     rows = compute_receive_number(rows)
-    # 按RECEIVE_NUMBER倒序排列，方便查看
     rows.sort(key=lambda r: r.get('RECEIVE_NUMBER', ''), reverse=True)
     print(json.dumps({"success": True, "records": rows}, ensure_ascii=False, indent=2))
 
 
 def cmd_get(db_path, record_id):
-    # ID may be numeric or string; try int first, otherwise quote as string
     try:
         id_clause = str(int(record_id))
     except (ValueError, TypeError):
         id_clause = f"'{record_id.replace(chr(39), chr(39)+chr(39))}'"
-    sql = f"SELECT {', '.join(FIELDS)} FROM FILE_DOCUMENT WHERE ID = {id_clause};"
+    sql = f"SELECT {sql_select(FIELDS)} FROM FILE_DOCUMENT WHERE ID = {id_clause};"
     out = run_h2(db_path, sql)
     rows = parse_table(out)
-    all_rows = parse_table(run_h2(db_path, f"SELECT {', '.join(FIELDS)} FROM FILE_DOCUMENT ORDER BY ID;"))
+    rows = restore_newlines(rows)
+    all_rows = parse_table(run_h2(db_path, f"SELECT {sql_select(FIELDS)} FROM FILE_DOCUMENT ORDER BY ID;"))
+    all_rows = restore_newlines(all_rows)
     all_rows = compute_receive_number(all_rows)
-    # 找到目标记录的 RECEIVE_NUMBER
     for r in all_rows:
         if str(r.get('ID')) == str(record_id):
             print(json.dumps({"success": True, "record": r}, ensure_ascii=False, indent=2))
@@ -169,9 +198,10 @@ def cmd_get(db_path, record_id):
 
 
 def cmd_search(db_path, keyword):
-    sql = f"SELECT {', '.join(FIELDS)} FROM FILE_DOCUMENT ORDER BY ID;"
+    sql = f"SELECT {sql_select(FIELDS)} FROM FILE_DOCUMENT ORDER BY ID;"
     out = run_h2(db_path, sql)
     rows = parse_table(out)
+    rows = restore_newlines(rows)
     rows = compute_receive_number(rows)
     kw = keyword.lower()
     filtered = []

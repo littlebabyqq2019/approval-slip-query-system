@@ -18,6 +18,10 @@
 #include <QApplication>
 #include <QCloseEvent>
 #include <QDebug>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QJsonParseError>
 
 namespace CrossNetShare {
 
@@ -48,6 +52,9 @@ MainWindow::MainWindow(QWidget* parent)
     } else {
         qDebug() << "[MainWindow] User config file not found:" << userConfigFile;
     }
+
+    // 加载数据库配置
+    loadDatabaseConfig();
 
     connect(server_, &Server::started, this, &MainWindow::onServerStarted);
     connect(server_, &Server::stopped, this, &MainWindow::onServerStopped);
@@ -423,8 +430,10 @@ void MainWindow::onSelectDatabaseClicked() {
     appendLog("选择数据库文件: " + basePath);
     bool ok = DbManager::instance()->setDatabasePath(basePath);
     if (ok) {
-        dbStatusLabel_->setText(QString("数据库已加载: %1").arg(QDir::toNativeSeparators(basePath)));
+        int count = DbManager::instance()->getAllRecords().size();
+        dbStatusLabel_->setText(QString("数据库已加载: %1 (共 %2 条记录)").arg(QDir::toNativeSeparators(basePath)).arg(count));
         dbStatusLabel_->setStyleSheet("font-size: 9pt; color: #166534; padding: 4px 10px; background-color: #dcfce7; border-radius: 4px;");
+        saveDatabaseConfig();
     } else {
         dbStatusLabel_->setText("加载数据库失败，请检查文件路径");
         dbStatusLabel_->setStyleSheet("font-size: 9pt; color: #991b1b; padding: 4px 10px; background-color: #fee2e2; border-radius: 4px;");
@@ -455,6 +464,59 @@ void MainWindow::onDbDatabaseChanged() {
     dbStatusLabel_->setText(QString("数据库已加载，共 %1 条记录").arg(count));
     dbStatusLabel_->setStyleSheet("font-size: 9pt; color: #166534; padding: 4px 10px; background-color: #dcfce7; border-radius: 4px;");
     appendLog(QString("数据库更新，共 %1 条批办单记录").arg(count));
+    saveDatabaseConfig();
+}
+
+void MainWindow::saveDatabaseConfig() {
+    QString configFile = QCoreApplication::applicationDirPath() + "/config.json";
+    QJsonObject root;
+    root["activeDatabase"] = DbManager::instance()->getActiveDatabase();
+    QJsonArray dbArray;
+    for (const QString& db : DbManager::instance()->getDatabaseList()) {
+        dbArray.append(db);
+    }
+    root["databases"] = dbArray;
+    QJsonDocument doc(root);
+    QFile f(configFile);
+    if (f.open(QIODevice::WriteOnly)) {
+        f.write(doc.toJson());
+        f.close();
+        qDebug() << "[MainWindow] Saved database config:" << configFile;
+    }
+}
+
+void MainWindow::loadDatabaseConfig() {
+    QString configFile = QCoreApplication::applicationDirPath() + "/config.json";
+    QFile f(configFile);
+    if (!f.open(QIODevice::ReadOnly)) {
+        qDebug() << "[MainWindow] No database config found:" << configFile;
+        return;
+    }
+    QJsonParseError err;
+    QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &err);
+    f.close();
+    if (doc.isNull() || !doc.isObject()) {
+        qDebug() << "[MainWindow] Invalid database config:" << err.errorString();
+        return;
+    }
+    QJsonObject root = doc.object();
+    QJsonArray dbArray = root.value("databases").toArray();
+    QString activeDb = root.value("activeDatabase").toString();
+    for (const QJsonValue& v : dbArray) {
+        QString dbPath = v.toString();
+        if (QFileInfo::exists(dbPath + ".mv.db")) {
+            DbManager::instance()->addDatabase(dbPath);
+            qDebug() << "[MainWindow] Loaded database from config:" << dbPath;
+        }
+    }
+    if (!activeDb.isEmpty() && DbManager::instance()->getDatabaseList().contains(activeDb)) {
+        DbManager::instance()->setActiveDatabase(activeDb);
+        dbPathLineEdit_->setText(QDir::toNativeSeparators(activeDb));
+        int count = DbManager::instance()->getAllRecords().size();
+        dbStatusLabel_->setText(QString("数据库已加载: %1 (共 %2 条记录)").arg(QDir::toNativeSeparators(activeDb)).arg(count));
+        dbStatusLabel_->setStyleSheet("font-size: 9pt; color: #166534; padding: 4px 10px; background-color: #dcfce7; border-radius: 4px;");
+        appendLog(QString("从配置加载数据库: %1 (共 %2 条记录)").arg(activeDb).arg(count));
+    }
 }
 
 }

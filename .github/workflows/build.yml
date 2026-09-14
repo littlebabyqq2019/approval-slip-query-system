@@ -51,14 +51,14 @@ jobs:
     - name: Collect Dependencies
       run: |
         cd build/bin/Release
-        & "${{ env.Qt5_DIR }}/bin/windeployqt.exe" --release CrossNetShareServer.exe
+        & "${{ env.Qt5_DIR }}/bin/windeployqt.exe" --release ApprovalSlipQueryServer.exe
 
     - name: Package Release
       run: |
         mkdir ApprovalSlipQuerySystem-Release
 
         # 复制服务器（仅服务器，无客户端）
-        Copy-Item build/bin/Release/CrossNetShareServer.exe ApprovalSlipQuerySystem-Release/
+        Copy-Item build/bin/Release/ApprovalSlipQueryServer.exe ApprovalSlipQuerySystem-Release/
         Copy-Item build/bin/Release/*.dll ApprovalSlipQuerySystem-Release/ -ErrorAction SilentlyContinue
         Copy-Item build/bin/Release/*.py ApprovalSlipQuerySystem-Release/ -ErrorAction SilentlyContinue
         Copy-Item build/bin/Release/*.lic ApprovalSlipQuerySystem-Release/ -ErrorAction SilentlyContinue

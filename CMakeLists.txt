@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(CrossNetShare VERSION 2.2.5 LANGUAGES CXX)
+project(ApprovalSlipQuerySystem VERSION 2.3.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -48,7 +48,7 @@ target_include_directories(common PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 # 服务器
 if(WIN32)
-    add_executable(CrossNetShareServer WIN32
+    add_executable(ApprovalSlipQueryServer WIN32
         server/main.cpp
         server/server.cpp
         server/server.h
@@ -85,7 +85,7 @@ if(WIN32)
         server/server.rc
     )
 else()
-    add_executable(CrossNetShareServer
+    add_executable(ApprovalSlipQueryServer
         server/main.cpp
         server/server.cpp
         server/server.h
@@ -116,7 +116,7 @@ else()
     )
 endif()
 
-target_link_libraries(CrossNetShareServer
+target_link_libraries(ApprovalSlipQueryServer
     PRIVATE common
     PRIVATE Qt5::Core
     PRIVATE Qt5::Widgets
@@ -125,10 +125,10 @@ target_link_libraries(CrossNetShareServer
 
 # Windows特定设置
 if(WIN32)
-    target_link_libraries(CrossNetShareServer PRIVATE ws2_32)
+    target_link_libraries(ApprovalSlipQueryServer PRIVATE ws2_32)
 
     # GUI应用（不显示控制台）
-    set_target_properties(CrossNetShareServer PROPERTIES WIN32_EXECUTABLE TRUE)
+    set_target_properties(ApprovalSlipQueryServer PROPERTIES WIN32_EXECUTABLE TRUE)
 
     # 部署Qt插件（图像格式插件）
     # 获取Qt安装路径
@@ -138,55 +138,55 @@ if(WIN32)
     set(QT_PLUGINS_DIR "${QT_ROOT_DIR}/plugins")
 
     # 在构建后复制图像格式插件到输出目录
-    add_custom_command(TARGET CrossNetShareServer POST_BUILD
+    add_custom_command(TARGET ApprovalSlipQueryServer POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory
-            "$<TARGET_FILE_DIR:CrossNetShareServer>/plugins/imageformats"
+            "$<TARGET_FILE_DIR:ApprovalSlipQueryServer>/plugins/imageformats"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${QT_PLUGINS_DIR}/imageformats/qjpeg.dll"
-            "$<TARGET_FILE_DIR:CrossNetShareServer>/plugins/imageformats/"
+            "$<TARGET_FILE_DIR:ApprovalSlipQueryServer>/plugins/imageformats/"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${QT_PLUGINS_DIR}/imageformats/qgif.dll"
-            "$<TARGET_FILE_DIR:CrossNetShareServer>/plugins/imageformats/"
+            "$<TARGET_FILE_DIR:ApprovalSlipQueryServer>/plugins/imageformats/"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${QT_PLUGINS_DIR}/imageformats/qico.dll"
-            "$<TARGET_FILE_DIR:CrossNetShareServer>/plugins/imageformats/"
+            "$<TARGET_FILE_DIR:ApprovalSlipQueryServer>/plugins/imageformats/"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${QT_PLUGINS_DIR}/imageformats/qsvg.dll"
-            "$<TARGET_FILE_DIR:CrossNetShareServer>/plugins/imageformats/"
+            "$<TARGET_FILE_DIR:ApprovalSlipQueryServer>/plugins/imageformats/"
         COMMENT "Copying Qt image format plugins..."
     )
-    
+
     # 复制Aspose.Words Python转换脚本
-    add_custom_command(TARGET CrossNetShareServer POST_BUILD
+    add_custom_command(TARGET ApprovalSlipQueryServer POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_SOURCE_DIR}/server/word_to_pdf.py"
-            "$<TARGET_FILE_DIR:CrossNetShareServer>/word_to_pdf.py"
+            "$<TARGET_FILE_DIR:ApprovalSlipQueryServer>/word_to_pdf.py"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_SOURCE_DIR}/server/db_query.py"
-            "$<TARGET_FILE_DIR:CrossNetShareServer>/db_query.py"
+            "$<TARGET_FILE_DIR:ApprovalSlipQueryServer>/db_query.py"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_SOURCE_DIR}/server/fill_template.py"
-            "$<TARGET_FILE_DIR:CrossNetShareServer>/fill_template.py"
+            "$<TARGET_FILE_DIR:ApprovalSlipQueryServer>/fill_template.py"
         COMMENT "Copying Python scripts (word_to_pdf, db_query, fill_template)..."
     )
-    
+
     # 复制批办单模板和 H2 数据库 jar
-    add_custom_command(TARGET CrossNetShareServer POST_BUILD
+    add_custom_command(TARGET ApprovalSlipQueryServer POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_SOURCE_DIR}/模板.docx"
-            "$<TARGET_FILE_DIR:CrossNetShareServer>/模板.docx"
+            "$<TARGET_FILE_DIR:ApprovalSlipQueryServer>/模板.docx"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_SOURCE_DIR}/h2.jar"
-            "$<TARGET_FILE_DIR:CrossNetShareServer>/h2.jar"
+            "$<TARGET_FILE_DIR:ApprovalSlipQueryServer>/h2.jar"
         COMMENT "Copying approval template and H2 jar..."
     )
-    
+
     # 如果许可证文件存在，复制它
     if(EXISTS "${CMAKE_SOURCE_DIR}/Aspose.Words/python专用whl包/1.lic")
-        add_custom_command(TARGET CrossNetShareServer POST_BUILD
+        add_custom_command(TARGET ApprovalSlipQueryServer POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${CMAKE_SOURCE_DIR}/Aspose.Words/python专用whl包/1.lic"
-                "$<TARGET_FILE_DIR:CrossNetShareServer>/1.lic"
+                "$<TARGET_FILE_DIR:ApprovalSlipQueryServer>/1.lic"
             COMMENT "Copying Aspose.Words license..."
         )
     endif()
