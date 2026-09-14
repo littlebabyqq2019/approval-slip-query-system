@@ -413,9 +413,9 @@ void MainWindow::onSettingsClicked() {
 void MainWindow::onSelectDatabaseClicked() {
     QStringList fileNames = QFileDialog::getOpenFileNames(
         this,
-        "选择 H2 数据库文件（可多选）",
+        "选择数据库文件（可多选）",
         QDir::homePath(),
-        "H2 数据库文件 (*.mv.db);;所有文件 (*.*)"
+        "数据库文件 (*.mv.db *.db);;H2 数据库 (*.mv.db);;SQLite 数据库 (*.db);;所有文件 (*.*)"
     );
     if (fileNames.isEmpty()) {
         return;
@@ -428,6 +428,8 @@ void MainWindow::onSelectDatabaseClicked() {
             basePath.chop(6);
         } else if (basePath.endsWith(".trace.db", Qt::CaseInsensitive)) {
             basePath.chop(9);
+        } else if (basePath.endsWith(".db", Qt::CaseInsensitive)) {
+            basePath.chop(3);
         }
         basePaths.append(basePath);
     }

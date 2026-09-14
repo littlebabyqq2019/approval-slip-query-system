@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-H2 数据库 FILE_DOCUMENT 读取脚本
+数据库读取脚本 (H2 + SQLite)
 用法:
   python db_query.py <db_path_without_ext> list           # 输出所有记录 JSON (含收文编号)
   python db_query.py <db_path_without_ext> get <id>       # 输出单条记录 JSON
@@ -14,6 +14,7 @@ import json
 import csv
 import io
 import re
+import sqlite3
 
 # Force UTF-8 stdout/stderr on Windows (default console code page is GBK/CP936)
 if sys.platform == 'win32':
@@ -27,6 +28,72 @@ H2_JAR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "h2.jar")
 if not os.path.exists(H2_JAR):
     H2_JAR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "h2.jar")
     H2_JAR = os.path.normpath(H2_JAR)
+
+
+def is_sqlite(db_path):
+    """Check if db_path + '.db' exists (SQLite) vs db_path + '.mv.db' (H2)."""
+    return os.path.exists(db_path + ".db") and not os.path.exists(db_path + ".mv.db")
+
+
+# SQLite column name → H2/program field name
+SQLITE_COLUMN_MAP = {
+    '收文编号': 'ID',
+    '来文单位': 'DEPARTMENT',
+    '来文字号': 'WORD_CODE',
+    '收文日期': 'FILE_RECEIVE_DATE',
+    '来文类型': 'FILE_CATEGORY',
+    '收文途径': 'RECEIVE_CHANNEL',
+    '文件标题': 'SUMMARY',
+    '领导批示': 'LEADER_INSTRUCTION',
+    '承办意见': 'SUGGESTION',
+    '办理情况': 'PROCESS_RESULT',
+    '文件名': 'ARCHIVE',
+    '创建时间': 'CREATE_TIME',
+    '更新时间': 'MODIFY_TIME',
+}
+
+
+def run_sqlite(db_path):
+    """Query SQLite database and return list of dicts with English field names."""
+    db_file = db_path + ".db"
+    conn = sqlite3.connect(db_file)
+    conn.text_factory = str
+    cur = conn.cursor()
+
+    # Get column names from the table
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+    tables = [r[0] for r in cur.fetchall()]
+    if not tables:
+        conn.close()
+        return []
+    table = tables[0]
+
+    cur.execute(f"SELECT * FROM {table}")
+    col_names = [desc[0] for desc in cur.description]
+    rows_raw = cur.fetchall()
+    conn.close()
+
+    # Map Chinese column names to English, fill missing fields with empty string
+    rows = []
+    for row_raw in rows_raw:
+        row = {}
+        for i, col in enumerate(col_names):
+            eng_name = SQLITE_COLUMN_MAP.get(col, col)
+            val = row_raw[i]
+            if val is not None:
+                val = str(val)
+            else:
+                val = ''
+            row[eng_name] = val
+        # Ensure all standard fields exist
+        for f in FIELDS:
+            if f not in row:
+                row[f] = ''
+        # SQLite 收文编号 is already the receive number
+        if row.get('ID'):
+            row['RECEIVE_NUMBER'] = row['ID']
+        rows.append(row)
+    return rows
 
 
 def run_h2(db_path, sql):
@@ -166,43 +233,43 @@ def restore_newlines(rows):
 
 
 def cmd_list(db_path):
-    sql = f"SELECT {sql_select(FIELDS)} FROM FILE_DOCUMENT ORDER BY ID;"
-    out = run_h2(db_path, sql)
-    rows = parse_table(out)
-    rows = restore_newlines(rows)
-    rows = compute_receive_number(rows)
+    if is_sqlite(db_path):
+        rows = run_sqlite(db_path)
+    else:
+        sql = f"SELECT {sql_select(FIELDS)} FROM FILE_DOCUMENT ORDER BY ID;"
+        out = run_h2(db_path, sql)
+        rows = parse_table(out)
+        rows = restore_newlines(rows)
+        rows = compute_receive_number(rows)
     rows.sort(key=lambda r: r.get('RECEIVE_NUMBER', ''), reverse=True)
     print(json.dumps({"success": True, "records": rows}, ensure_ascii=False, indent=2))
 
 
 def cmd_get(db_path, record_id):
-    try:
-        id_clause = str(int(record_id))
-    except (ValueError, TypeError):
-        id_clause = f"'{record_id.replace(chr(39), chr(39)+chr(39))}'"
-    sql = f"SELECT {sql_select(FIELDS)} FROM FILE_DOCUMENT WHERE ID = {id_clause};"
-    out = run_h2(db_path, sql)
-    rows = parse_table(out)
-    rows = restore_newlines(rows)
-    all_rows = parse_table(run_h2(db_path, f"SELECT {sql_select(FIELDS)} FROM FILE_DOCUMENT ORDER BY ID;"))
-    all_rows = restore_newlines(all_rows)
-    all_rows = compute_receive_number(all_rows)
+    if is_sqlite(db_path):
+        all_rows = run_sqlite(db_path)
+    else:
+        sql = f"SELECT {sql_select(FIELDS)} FROM FILE_DOCUMENT ORDER BY ID;"
+        out = run_h2(db_path, sql)
+        all_rows = parse_table(out)
+        all_rows = restore_newlines(all_rows)
+        all_rows = compute_receive_number(all_rows)
     for r in all_rows:
         if str(r.get('ID')) == str(record_id):
             print(json.dumps({"success": True, "record": r}, ensure_ascii=False, indent=2))
             return
-    if rows:
-        print(json.dumps({"success": True, "record": rows[0]}, ensure_ascii=False, indent=2))
-    else:
-        print(json.dumps({"success": False, "error": "record not found"}, ensure_ascii=False))
+    print(json.dumps({"success": False, "error": "record not found"}, ensure_ascii=False))
 
 
 def cmd_search(db_path, keyword):
-    sql = f"SELECT {sql_select(FIELDS)} FROM FILE_DOCUMENT ORDER BY ID;"
-    out = run_h2(db_path, sql)
-    rows = parse_table(out)
-    rows = restore_newlines(rows)
-    rows = compute_receive_number(rows)
+    if is_sqlite(db_path):
+        rows = run_sqlite(db_path)
+    else:
+        sql = f"SELECT {sql_select(FIELDS)} FROM FILE_DOCUMENT ORDER BY ID;"
+        out = run_h2(db_path, sql)
+        rows = parse_table(out)
+        rows = restore_newlines(rows)
+        rows = compute_receive_number(rows)
     kw = keyword.lower()
     filtered = []
     for r in rows:

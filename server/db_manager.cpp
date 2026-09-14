@@ -141,8 +141,9 @@ bool DbManager::parseRecordsJson(const QString& jsonText, QList<ApprovalRecord>&
 bool DbManager::setDatabasePath(const QString& dbBasePath) {
     QMutexLocker lock(&mutex_);
     QString mvDb = dbBasePath + ".mv.db";
-    if (!QFileInfo::exists(mvDb)) {
-        emit error("找不到数据库文件: " + mvDb);
+    QString sqliteDb = dbBasePath + ".db";
+    if (!QFileInfo::exists(mvDb) && !QFileInfo::exists(sqliteDb)) {
+        emit error("找不到数据库文件: " + mvDb + " 或 " + sqliteDb);
         return false;
     }
     activeDbPath_ = dbBasePath;
@@ -160,8 +161,9 @@ bool DbManager::setDatabasePath(const QString& dbBasePath) {
 
 bool DbManager::addDatabase(const QString& dbBasePath) {
     QString mvDb = dbBasePath + ".mv.db";
-    if (!QFileInfo::exists(mvDb)) {
-        emit error("找不到数据库文件: " + mvDb);
+    QString sqliteDb = dbBasePath + ".db";
+    if (!QFileInfo::exists(mvDb) && !QFileInfo::exists(sqliteDb)) {
+        emit error("找不到数据库文件: " + mvDb + " 或 " + sqliteDb);
         return false;
     }
     QMutexLocker lock(&mutex_);
