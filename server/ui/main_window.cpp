@@ -22,6 +22,12 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QJsonParseError>
+#include <QDialog>
+#include <QFormLayout>
+#include <QSpinBox>
+#include <QDialogButtonBox>
+#include <QLineEdit>
+#include <QLabel>
 
 namespace CrossNetShare {
 
@@ -225,6 +231,15 @@ void MainWindow::setupUi() {
     );
     connect(selectDbButton_, &QPushButton::clicked, this, &MainWindow::onSelectDatabaseClicked);
     dbLayout->addWidget(selectDbButton_);
+
+    addRemoteDbButton_ = new QPushButton("远程...");
+    addRemoteDbButton_->setMinimumHeight(34);
+    addRemoteDbButton_->setStyleSheet(
+        "QPushButton { padding: 6px 16px; font-size: 10pt; background-color: #6366f1; color: white; border: none; border-radius: 4px; } "
+        "QPushButton:hover { background-color: #4f46e5; }"
+    );
+    connect(addRemoteDbButton_, &QPushButton::clicked, this, &MainWindow::onAddRemoteDatabaseClicked);
+    dbLayout->addWidget(addRemoteDbButton_);
 
     refreshDbButton_ = new QPushButton("刷新");
     refreshDbButton_->setMinimumHeight(34);
@@ -454,6 +469,75 @@ void MainWindow::onSelectDatabaseClicked() {
     }
 }
 
+void MainWindow::onAddRemoteDatabaseClicked() {
+    QDialog dialog(this);
+    dialog.setWindowTitle("添加远程数据库 (H2 TCP)");
+    dialog.setModal(true);
+
+    QFormLayout form(&dialog);
+
+    QLineEdit ipEdit;
+    ipEdit.setPlaceholderText("例如 192.168.1.100");
+    form.addRow("服务器 IP:", &ipEdit);
+
+    QSpinBox portEdit;
+    portEdit.setRange(1, 65535);
+    portEdit.setValue(9092);
+    form.addRow("端口:", &portEdit);
+
+    QLineEdit pathEdit;
+    pathEdit.setPlaceholderText("远程机器上数据库路径(不含扩展名)，例如 /D:/data/doc-2026");
+    form.addRow("数据库路径:", &pathEdit);
+
+    QLineEdit userEdit;
+    userEdit.setText("sa");
+    form.addRow("用户名:", &userEdit);
+
+    QLineEdit passwordEdit;
+    passwordEdit.setEchoMode(QLineEdit::Password);
+    form.addRow("密码:", &passwordEdit);
+
+    QDialogButtonBox buttons(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    form.addRow(&buttons);
+    connect(&buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(&buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+    if (dialog.exec() != QDialog::Accepted) return;
+
+    QString ip = ipEdit.text().trimmed();
+    int port = portEdit.value();
+    QString remotePath = pathEdit.text().trimmed();
+    QString user = userEdit.text().trimmed();
+    QString password = passwordEdit.text();
+
+    if (ip.isEmpty() || remotePath.isEmpty()) {
+        QMessageBox::warning(this, "错误", "IP 和数据库路径不能为空");
+        return;
+    }
+
+    QString connStr;
+    if (!password.isEmpty()) {
+        connStr = QString("tcp://%1:%2@%3:%4%5").arg(user, password, ip).arg(port).arg(remotePath);
+    } else {
+        connStr = QString("tcp://%1@%2:%3%4").arg(user, ip).arg(port).arg(remotePath);
+    }
+
+    appendLog("添加远程数据库: " + connStr);
+    DbManager::instance()->addDatabase(connStr);
+
+    dbPathLineEdit_->setText(connStr);
+    bool ok = DbManager::instance()->setActiveDatabase(connStr);
+    if (ok) {
+        int count = DbManager::instance()->getAllRecords().size();
+        dbStatusLabel_->setText(QString("远程数据库已连接 (共 %1 条记录)").arg(count));
+        dbStatusLabel_->setStyleSheet("font-size: 9pt; color: #166534; padding: 4px 10px; background-color: #dcfce7; border-radius: 4px;");
+        saveDatabaseConfig();
+    } else {
+        dbStatusLabel_->setText("连接远程数据库失败，请检查网络和参数");
+        dbStatusLabel_->setStyleSheet("font-size: 9pt; color: #991b1b; padding: 4px 10px; background-color: #fee2e2; border-radius: 4px;");
+    }
+}
+
 void MainWindow::onRefreshDbClicked() {
     QString path = dbPathLineEdit_->text().trimmed();
     if (path.isEmpty()) {
@@ -522,7 +606,9 @@ void MainWindow::loadDatabaseConfig() {
     QString activeDb = root.value("activeDatabase").toString();
     for (const QJsonValue& v : dbArray) {
         QString dbPath = v.toString();
-        if (QFileInfo::exists(dbPath + ".mv.db")) {
+        if (dbPath.startsWith("tcp://") ||
+            QFileInfo::exists(dbPath + ".mv.db") ||
+            QFileInfo::exists(dbPath + ".db")) {
             DbManager::instance()->addDatabase(dbPath);
             qDebug() << "[MainWindow] Loaded database from config:" << dbPath;
         }

@@ -33,6 +33,7 @@ protected:
 private slots:
     void onStartStopClicked();
     void onSelectDatabaseClicked();
+    void onAddRemoteDatabaseClicked();
     void onRefreshDbClicked();
     void onServerStarted();
     void onServerStopped();
@@ -63,6 +64,7 @@ private:
     QSpinBox* webPortSpinBox_;
     QPushButton* startStopButton_;
     QPushButton* selectDbButton_;
+    QPushButton* addRemoteDbButton_;
     QPushButton* refreshDbButton_;
     QLineEdit* dbPathLineEdit_;
     QLabel* dbStatusLabel_;

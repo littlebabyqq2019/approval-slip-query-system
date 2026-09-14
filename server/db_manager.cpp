@@ -140,11 +140,14 @@ bool DbManager::parseRecordsJson(const QString& jsonText, QList<ApprovalRecord>&
 
 bool DbManager::setDatabasePath(const QString& dbBasePath) {
     QMutexLocker lock(&mutex_);
-    QString mvDb = dbBasePath + ".mv.db";
-    QString sqliteDb = dbBasePath + ".db";
-    if (!QFileInfo::exists(mvDb) && !QFileInfo::exists(sqliteDb)) {
-        emit error("找不到数据库文件: " + mvDb + " 或 " + sqliteDb);
-        return false;
+    bool isRemote = dbBasePath.startsWith("tcp://");
+    if (!isRemote) {
+        QString mvDb = dbBasePath + ".mv.db";
+        QString sqliteDb = dbBasePath + ".db";
+        if (!QFileInfo::exists(mvDb) && !QFileInfo::exists(sqliteDb)) {
+            emit error("找不到数据库文件: " + mvDb + " 或 " + sqliteDb);
+            return false;
+        }
     }
     activeDbPath_ = dbBasePath;
     if (!databasePaths_.contains(dbBasePath)) {
@@ -160,11 +163,14 @@ bool DbManager::setDatabasePath(const QString& dbBasePath) {
 }
 
 bool DbManager::addDatabase(const QString& dbBasePath) {
-    QString mvDb = dbBasePath + ".mv.db";
-    QString sqliteDb = dbBasePath + ".db";
-    if (!QFileInfo::exists(mvDb) && !QFileInfo::exists(sqliteDb)) {
-        emit error("找不到数据库文件: " + mvDb + " 或 " + sqliteDb);
-        return false;
+    bool isRemote = dbBasePath.startsWith("tcp://");
+    if (!isRemote) {
+        QString mvDb = dbBasePath + ".mv.db";
+        QString sqliteDb = dbBasePath + ".db";
+        if (!QFileInfo::exists(mvDb) && !QFileInfo::exists(sqliteDb)) {
+            emit error("找不到数据库文件: " + mvDb + " 或 " + sqliteDb);
+            return false;
+        }
     }
     QMutexLocker lock(&mutex_);
     if (!databasePaths_.contains(dbBasePath)) {

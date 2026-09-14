@@ -35,6 +35,25 @@ def is_sqlite(db_path):
     return os.path.exists(db_path + ".db") and not os.path.exists(db_path + ".mv.db")
 
 
+def is_remote(db_path):
+    """Check if db_path is a remote H2 TCP connection (tcp://...)."""
+    return db_path.startswith("tcp://")
+
+
+def parse_remote_url(db_path):
+    """Parse tcp://[user:password@]host:port/remote-path into (url_suffix, user, password)."""
+    rest = db_path[len("tcp://"):]
+    user = "sa"
+    password = ""
+    if "@" in rest:
+        creds, rest = rest.rsplit("@", 1)
+        if ":" in creds:
+            user, password = creds.split(":", 1)
+        else:
+            user = creds
+    return f"tcp://{rest}", user, password
+
+
 # SQLite column name → H2/program field name
 SQLITE_COLUMN_MAP = {
     '收文编号': 'ID',
@@ -97,7 +116,13 @@ def run_sqlite(db_path):
 
 
 def run_h2(db_path, sql):
-    url = f"jdbc:h2:{db_path};IFEXISTS=TRUE;ACCESS_MODE_DATA=r"
+    if is_remote(db_path):
+        url_suffix, h2_user, h2_password = parse_remote_url(db_path)
+        url = f"jdbc:h2:{url_suffix};ACCESS_MODE_DATA=r"
+    else:
+        url = f"jdbc:h2:{db_path};IFEXISTS=TRUE;ACCESS_MODE_DATA=r"
+        h2_user = "sa"
+        h2_password = ""
     cmd = [
         "java",
         "-Dfile.encoding=UTF-8",
@@ -105,8 +130,8 @@ def run_h2(db_path, sql):
         "-Dsun.stdout.encoding=UTF-8",
         "-cp", H2_JAR, "org.h2.tools.Shell",
         "-url", url,
-        "-user", "sa",
-        "-password", "",
+        "-user", h2_user,
+        "-password", h2_password,
         "-sql", sql
     ]
     env = os.environ.copy()
