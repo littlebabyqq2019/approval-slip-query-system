@@ -42,6 +42,11 @@ def is_remote(db_path):
 
 def parse_remote_url(db_path):
     """Parse tcp://[user:password@]host:port/remote-path into (url_suffix, user, password)."""
+    # Normalize Unicode hyphens to ASCII hyphen (U+002D)
+    # Common confusables: U+2010 hyphen, U+2011 non-breaking hyphen, U+2012 figure dash,
+    # U+2013 en dash, U+2014 em dash, U+2212 minus sign
+    for ch in '\u2010\u2011\u2012\u2013\u2014\u2212':
+        db_path = db_path.replace(ch, '-')
     rest = db_path[len("tcp://"):]
     user = "sa"
     password = ""
