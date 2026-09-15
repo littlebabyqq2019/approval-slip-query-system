@@ -126,6 +126,30 @@ def run_sqlite(db_path):
     return rows
 
 
+def find_java():
+    """Find java executable: JAVA_HOME, PATH, then common install locations."""
+    java_home = os.environ.get('JAVA_HOME')
+    if java_home:
+        p = os.path.join(java_home, 'bin', 'java.exe')
+        if os.path.exists(p):
+            return p
+    from shutil import which
+    p = which('java')
+    if p:
+        return p
+    for base in [
+        os.environ.get('ProgramFiles', r'C:\Program Files'),
+        os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)'),
+    ]:
+        java_dir = os.path.join(base, 'Java')
+        if os.path.isdir(java_dir):
+            for sub in sorted(os.listdir(java_dir), reverse=True):
+                candidate = os.path.join(java_dir, sub, 'bin', 'java.exe')
+                if os.path.exists(candidate):
+                    return candidate
+    return "java"
+
+
 def run_h2(db_path, sql):
     if is_remote(db_path):
         url_suffix, h2_user, h2_password = parse_remote_url(db_path)
@@ -134,8 +158,9 @@ def run_h2(db_path, sql):
         url = f"jdbc:h2:{db_path};IFEXISTS=TRUE;ACCESS_MODE_DATA=r"
         h2_user = "sa"
         h2_password = ""
+    java_exe = find_java()
     cmd = [
-        "java",
+        java_exe,
         "-Dfile.encoding=UTF-8",
         "-Dstdout.encoding=UTF-8",
         "-Dsun.stdout.encoding=UTF-8",
@@ -147,7 +172,10 @@ def run_h2(db_path, sql):
     ]
     env = os.environ.copy()
     env['JAVA_TOOL_OPTIONS'] = '-Dfile.encoding=UTF-8'
-    result = subprocess.run(cmd, capture_output=True, cwd=os.path.dirname(H2_JAR), env=env)
+    try:
+        result = subprocess.run(cmd, capture_output=True, cwd=os.path.dirname(H2_JAR), env=env)
+    except FileNotFoundError:
+        return "", "Java not found. Install Java or set JAVA_HOME. Searched: JAVA_HOME, PATH, C:\\Program Files\\Java\\*"
     raw = result.stdout
     err_text = result.stderr.decode('utf-8', errors='replace')
     # Try UTF-8 first; if replacement chars appear, fall back to GBK (Windows Chinese default)
