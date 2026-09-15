@@ -52,7 +52,11 @@ def parse_remote_url(db_path):
         else:
             user = creds
     # Ensure path starts with / after port (fix missing slash in older configs)
-    rest = re.sub(r'(:\d+)([^/])', r'\1/\2', rest)
+    m = re.search(r':\d+', rest)
+    if m:
+        pos = m.end()
+        if pos < len(rest) and rest[pos] != '/':
+            rest = rest[:pos] + '/' + rest[pos:]
     return f"tcp://{rest}", user, password
 
 
