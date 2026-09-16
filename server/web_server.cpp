@@ -964,12 +964,12 @@ void WebServer::handleFilePreview(QTcpSocket* socket, const HttpRequest& request
         }
         QString htmlContent = QString::fromUtf8(htmlFile.readAll());
         htmlFile.close();
-        // 格式化日期: "2026-09-15" → "2026年9月15日"
+        // 格式化日期: "2026-09-15" → "2026-9-15" (去掉月日前导零)
         QString formattedDate = record.fileReceiveDate;
         QRegularExpression dateRe("(\\d{4})-(\\d{1,2})-(\\d{1,2})");
         auto dateMatch = dateRe.match(formattedDate);
         if (dateMatch.hasMatch()) {
-            formattedDate = QString("%1年%2月%3日")
+            formattedDate = QString("%1-%2-%3")
                 .arg(dateMatch.captured(1).toInt())
                 .arg(dateMatch.captured(2).toInt())
                 .arg(dateMatch.captured(3).toInt());
