@@ -63,6 +63,7 @@ jobs:
         Copy-Item build/bin/Release/*.py ApprovalSlipQuerySystem-Release/ -ErrorAction SilentlyContinue
         Copy-Item build/bin/Release/*.lic ApprovalSlipQuerySystem-Release/ -ErrorAction SilentlyContinue
         Copy-Item build/bin/Release/模板.docx ApprovalSlipQuerySystem-Release/ -ErrorAction SilentlyContinue
+        Copy-Item build/bin/Release/文件批办单.html ApprovalSlipQuerySystem-Release/ -ErrorAction SilentlyContinue
         Copy-Item build/bin/Release/h2.jar ApprovalSlipQuerySystem-Release/ -ErrorAction SilentlyContinue
         Copy-Item build/bin/Release/platforms ApprovalSlipQuerySystem-Release/ -Recurse -ErrorAction SilentlyContinue
         Copy-Item build/bin/Release/styles ApprovalSlipQuerySystem-Release/ -Recurse -ErrorAction SilentlyContinue

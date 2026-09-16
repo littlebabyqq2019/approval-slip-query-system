@@ -951,38 +951,68 @@ void WebServer::handleFilePreview(QTcpSocket* socket, const HttpRequest& request
         // 记录审计
         AuditLogger::instance()->log(username, AuditAction::PreviewFile,
                                      record.receiveNumber, socket->peerAddress().toString(), true);
-        // 填充模板生成 PDF，用浏览器内置 PDF 查看器展示（布局与 Word 完全一致）
-        QString templatePath = QCoreApplication::applicationDirPath() + "/模板.docx";
-        QString errMsg;
-        QString docxPath, pdfPath;
-        QString generatedPdf = DbManager::instance()->generateDocument(record, templatePath,
-                                                                       docxPath, pdfPath, errMsg);
-        if (generatedPdf.isEmpty() || !QFile::exists(pdfPath)) {
-            qWarning() << "[WebServer] preview PDF generation failed:" << errMsg;
+        // HTML 模板预览：读取 HTML 模板，注入 fillForm() 调用，直接返回 HTML
+        QString htmlTemplatePath = QCoreApplication::applicationDirPath() + "/文件批办单.html";
+        QFile htmlFile(htmlTemplatePath);
+        if (!htmlFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
             HttpResponse response;
             response.statusCode = 200;
             response.headers["Content-Type"] = "text/html; charset=utf-8";
-            response.body = QString("<div style='padding:24px;color:#991b1b'>预览生成失败: %1</div>").arg(errMsg.toHtmlEscaped()).toUtf8();
+            response.body = QString("<div style='padding:24px;color:#991b1b'>找不到HTML模板文件: %1</div>").arg(htmlTemplatePath).toUtf8();
             sendResponse(socket, response);
             return;
         }
-        // 读取 PDF 文件内容返回给浏览器
-        QFile pdfFile(pdfPath);
-        if (!pdfFile.open(QIODevice::ReadOnly)) {
-            HttpResponse response;
-            response.statusCode = 500;
-            response.headers["Content-Type"] = "text/html; charset=utf-8";
-            response.body = "无法读取生成的 PDF 文件";
-            sendResponse(socket, response);
-            return;
+        QString htmlContent = QString::fromUtf8(htmlFile.readAll());
+        htmlFile.close();
+        // 格式化日期: "2026-09-15" → "2026年9月15日"
+        QString formattedDate = record.fileReceiveDate;
+        QRegularExpression dateRe("(\\d{4})-(\\d{1,2})-(\\d{1,2})");
+        auto dateMatch = dateRe.match(formattedDate);
+        if (dateMatch.hasMatch()) {
+            formattedDate = QString("%1年%2月%3日")
+                .arg(dateMatch.captured(1).toInt())
+                .arg(dateMatch.captured(2).toInt())
+                .arg(dateMatch.captured(3).toInt());
         }
+        // 构建 fillForm 数据 JSON
+        auto esc = [](const QString& s) -> QString {
+            QString r = s;
+            r.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "").replace("\t", "\\t");
+            return "\"" + r + "\"";
+        };
+        QString fillData = "{"
+            "laiwenDanwei:" + esc(record.department) + ","
+            "laiwenZihao:" + esc(record.wordCode) + ","
+            "shouwenRiqi:" + esc(formattedDate) + ","
+            "laiwenLeixing:" + esc(record.fileCategory) + ","
+            "shouwenTujing:" + esc(record.receiveChannel) + ","
+            "jinjiChengdu:" + esc(record.emergencyLevel) + ","
+            "miJi:" + esc(record.secretLevel) + ","
+            "shouwenBianhao:" + esc(record.receiveNumber) + ","
+            "wenjianBiaoti:" + esc(record.summary) + ","
+            "lingdaoPishi:" + esc(record.leaderInstruction) + ","
+            "niBanYijian:" + esc(record.suggestion) + ","
+            "chuanYueNames:[],"
+            "chuanYueDates:[],"
+            "banliJieguo:" + esc(record.processResult) +
+            "}";
+        // 在 </body> 前注入 fillForm 调用
+        QString injectScript = QString(
+            "<script>\n"
+            "if(document.fonts && document.fonts.ready){\n"
+            "  document.fonts.ready.then(function(){ fillForm(%1); });\n"
+            "}else{\n"
+            "  setTimeout(function(){ fillForm(%1); }, 200);\n"
+            "}\n"
+            "</script>\n"
+            "</body>"
+        ).arg(fillData);
+        htmlContent.replace("</body>", injectScript, Qt::CaseInsensitive);
         HttpResponse response;
         response.statusCode = 200;
         response.statusText = "OK";
-        response.headers["Content-Type"] = "application/pdf";
-        response.headers["Content-Disposition"] = "inline";
-        response.body = pdfFile.readAll();
-        pdfFile.close();
+        response.headers["Content-Type"] = "text/html; charset=utf-8";
+        response.body = htmlContent.toUtf8();
         sendResponse(socket, response);
         return;
     }

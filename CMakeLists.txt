@@ -179,6 +179,14 @@ if(WIN32)
             COMMENT "Copying approval template..."
         )
     endif()
+    if(EXISTS "${CMAKE_SOURCE_DIR}/文件批办单.html")
+        add_custom_command(TARGET ApprovalSlipQueryServer POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_SOURCE_DIR}/文件批办单.html"
+                "$<TARGET_FILE_DIR:ApprovalSlipQueryServer>/文件批办单.html"
+            COMMENT "Copying HTML preview template..."
+        )
+    endif()
     if(EXISTS "${CMAKE_SOURCE_DIR}/h2.jar")
         add_custom_command(TARGET ApprovalSlipQueryServer POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
