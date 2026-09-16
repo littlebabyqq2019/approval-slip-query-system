@@ -188,13 +188,14 @@
     color:var(--line);
     white-space:nowrap;
     letter-spacing:0;
+    text-align:center;
   }
 
   /* ---------- 打印 ---------- */
   @page{ size:A4; margin:0; }
   @media print{
     html,body{ background:#fff; }
-    .page{ margin:0; padding:2.54cm 1.5cm; width:auto; min-height:0; box-shadow:none; }
+    .page{ margin:0; padding:var(--mg-tb) var(--mg-lr); width:var(--page-w); min-height:var(--page-h); box-shadow:none; }
   }
 </style>
 </head>
@@ -440,6 +441,26 @@ function fillForm(data){
 function clearForm(){
   document.querySelectorAll('[data-field]').forEach(function(el){ setCell(el, ''); });
 }
+
+/* 打印前重新执行 autofit，确保打印时字号缩放生效 */
+window.addEventListener('beforeprint', function(){
+  document.querySelectorAll('[data-field]').forEach(function(el){
+    if(!el.textContent.trim()) return;
+    el.style.fontSize = '';
+    el.style.lineHeight = '';
+    if(el.classList.contains('autofit'))  autoFitFont(el);
+    if(el.classList.contains('fitlines')) autoFitLine(el);
+  });
+});
+window.addEventListener('afterprint', function(){
+  document.querySelectorAll('[data-field]').forEach(function(el){
+    if(!el.textContent.trim()) return;
+    el.style.fontSize = '';
+    el.style.lineHeight = '';
+    if(el.classList.contains('autofit'))  autoFitFont(el);
+    if(el.classList.contains('fitlines')) autoFitLine(el);
+  });
+});
 
 /* 地址栏带 ?demo=1 时自动填入示例数据 */
 if(/(\?|&)demo\b/.test(location.search)){
