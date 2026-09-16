@@ -447,24 +447,23 @@ function clearForm(){
   document.querySelectorAll('[data-field]').forEach(function(el){ setCell(el, ''); });
 }
 
-/* 打印前重新执行 autofit，确保打印时字号缩放生效 */
+/* 打印前：将 JS 设的 inline font-size/line-height 转为 CSS 规则
+   （浏览器打印会丢弃 inline style，但保留 <style> 标签中的规则） */
 window.addEventListener('beforeprint', function(){
+  var rules = '';
   document.querySelectorAll('[data-field]').forEach(function(el){
-    if(!el.textContent.trim()) return;
-    el.style.fontSize = '';
-    el.style.lineHeight = '';
-    if(el.classList.contains('autofit'))  autoFitFont(el);
-    if(el.classList.contains('fitlines')) autoFitLine(el);
+    var f = el.getAttribute('data-field');
+    if(el.style.fontSize) rules += '[data-field="'+f+'"]{font-size:'+el.style.fontSize+'!important}';
+    if(el.style.lineHeight) rules += '[data-field="'+f+'"]{line-height:'+el.style.lineHeight+'!important}';
   });
+  var s = document.getElementById('print-autofit') || document.createElement('style');
+  s.id = 'print-autofit';
+  s.textContent = rules;
+  if(!s.parentNode) document.head.appendChild(s);
 });
 window.addEventListener('afterprint', function(){
-  document.querySelectorAll('[data-field]').forEach(function(el){
-    if(!el.textContent.trim()) return;
-    el.style.fontSize = '';
-    el.style.lineHeight = '';
-    if(el.classList.contains('autofit'))  autoFitFont(el);
-    if(el.classList.contains('fitlines')) autoFitLine(el);
-  });
+  var s = document.getElementById('print-autofit');
+  if(s) s.textContent = '';
 });
 
 /* 地址栏带 ?demo=1 时自动填入示例数据 */
