@@ -192,10 +192,11 @@
   }
 
   /* ---------- 打印 ---------- */
-  @page{ size:A4; margin:2.54cm 3.175cm; }
+  @page{ size:A4; margin:0; }
   @media print{
     html,body{ background:#fff; }
-    .page{ margin:0; padding:0; width:auto; min-height:0; box-shadow:none; }
+    .page{ margin:0; padding:2.54cm 1.5cm; width:auto; min-height:0; box-shadow:none; }
+    table.piban{ margin-left:0; margin-right:0; }
   }
 </style>
 </head>
