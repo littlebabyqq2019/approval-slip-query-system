@@ -131,8 +131,7 @@
   table.piban{
     table-layout:fixed;                /* ① 列宽由 colgroup 决定，内容无权改变 */
     width:var(--table-w);
-    margin-left:var(--table-shift);
-    margin-right:var(--table-shift);
+    margin:0 auto;                     /* 居中（自动计算左右边距，含负值溢出） */
     border-collapse:collapse;
     border-spacing:0;
     color:var(--ink);
@@ -196,7 +195,6 @@
   @media print{
     html,body{ background:#fff; }
     .page{ margin:0; padding:2.54cm 1.5cm; width:auto; min-height:0; box-shadow:none; }
-    table.piban{ margin-left:0; margin-right:0; }
   }
 </style>
 </head>
