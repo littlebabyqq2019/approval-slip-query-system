@@ -425,8 +425,9 @@ function setCell(el, v){
       el.appendChild(d);
     });
   }else if(isTitleWithSecret){
-    // 文件标题包含"（注意密级管理）"，将其标红
+    // 文件标题包含"（注意密级管理）"，将其标红且防止换行
     el.innerHTML = '';
+    el.style.whiteSpace = 'nowrap'; // 防止红色文本单独换行
     var parts = v.split('（注意密级管理）');
     if(parts.length === 2){
       // 前缀（黑色）
@@ -439,6 +440,7 @@ function setCell(el, v){
       var spanRed = document.createElement('span');
       spanRed.textContent = '（注意密级管理）';
       spanRed.style.color = '#FF0000';
+      spanRed.style.whiteSpace = 'nowrap'; // 确保红色文本不换行
       el.appendChild(spanRed);
       // 后缀（黑色）
       if(parts[1]){
