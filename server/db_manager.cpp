@@ -331,9 +331,9 @@ QString DbManager::generateDocument(const ApprovalRecord& record,
         return "";
     }
     QString appDir = findAppDir();
-    QString script = appDir + "/fill_template_v2.py";
+    QString script = appDir + "/fill_template.py";
     if (!QFileInfo::exists(script)) {
-        script = QDir::cleanPath(qApp->applicationDirPath() + "/../../server/fill_template_v2.py");
+        script = QDir::cleanPath(qApp->applicationDirPath() + "/../../server/fill_template.py");
     }
     if (!QFileInfo::exists(script)) {
         errorMessage = "找不到 fill_template_v2.py 脚本: " + script;
