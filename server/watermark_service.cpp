@@ -199,7 +199,8 @@ void WatermarkService::setKeywords(const QList<KeywordRule>& keywords) {
 WatermarkService::WatermarkResult WatermarkService::generateWatermarkedImages(
     const QString& wordFilePath,
     const QString& outputDir,
-    const QString& originalFileName)
+    const QString& originalFileName,
+    const QString& suggestionTextOverride)
 {
     WatermarkResult result;
 
@@ -214,9 +215,13 @@ WatermarkService::WatermarkResult WatermarkService::generateWatermarkedImages(
         return result;
     }
 
-    // 2. 直接从 Word 文档提取"建议："段落
+    // 2. 提取建议内容：优先使用外部传入的 SUGGESTION 字段（批办单模式），
+    //    否则回退到从 Word 文档提取
     emit progress("提取建议内容...", 3, 5);
-    QString suggestionText = extractSuggestionFromWord(wordFilePath);
+    QString suggestionText = suggestionTextOverride;
+    if (suggestionText.isEmpty()) {
+        suggestionText = extractSuggestionFromWord(wordFilePath);
+    }
     if (suggestionText.isEmpty()) {
         LOG_MESSAGE("Warning: No suggestion text found (no '建议：' paragraph)");
     }
@@ -231,6 +236,9 @@ WatermarkService::WatermarkResult WatermarkService::generateWatermarkedImages(
             unifiedRule.watermarkText = config_.unifiedText;
             unifiedRule.enabled = true;
             matchedRules.append(unifiedRule);
+        } else if (!suggestionText.isEmpty()) {
+            // 统一文字为空时回退到关键词匹配，避免生成无水印原图
+            matchedRules = matchKeywords(suggestionText);
         }
     } else {
         // 关键词模式：匹配检测到的关键词

@@ -331,12 +331,12 @@ QString DbManager::generateDocument(const ApprovalRecord& record,
         return "";
     }
     QString appDir = findAppDir();
-    QString script = appDir + "/fill_template.py";
+    QString script = appDir + "/fill_template_v2.py";
     if (!QFileInfo::exists(script)) {
-        script = QDir::cleanPath(qApp->applicationDirPath() + "/../../server/fill_template.py");
+        script = QDir::cleanPath(qApp->applicationDirPath() + "/../../server/fill_template_v2.py");
     }
     if (!QFileInfo::exists(script)) {
-        errorMessage = "找不到 fill_template.py 脚本: " + script;
+        errorMessage = "找不到 fill_template_v2.py 脚本: " + script;
         return "";
     }
     QString realTemplate = templatePath;

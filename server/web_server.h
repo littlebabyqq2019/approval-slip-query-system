@@ -101,7 +101,7 @@ private:
     void processBatchDownloadFiles(QTcpSocket* socket, const QList<FileInfo>& files);
 
     // Watermark helper
-    void processWatermarkGeneration(QTcpSocket* socket, const QString& tempDir, const QString& tempFilePath, const QString& username);
+    void processWatermarkGeneration(QTcpSocket* socket, const QString& tempDir, const QString& tempFilePath, const QString& username, const QString& suggestionText = "");
 
     QTcpServer* tcpServer_;
     FileIndexer* indexer_;

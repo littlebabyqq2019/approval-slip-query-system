@@ -73,10 +73,13 @@ public:
     void setKeywords(const QList<KeywordRule>& keywords);
 
     // 生成带水印的图片
+    // suggestionTextOverride: 非空时直接使用该文本进行关键词匹配（批办单模式
+    // 直接传入数据库中的 SUGGESTION 字段，避免依赖从 Word 文档提取文本）
     WatermarkResult generateWatermarkedImages(
         const QString& wordFilePath,
         const QString& outputDir,
-        const QString& originalFileName
+        const QString& originalFileName,
+        const QString& suggestionTextOverride = QString()
     );
 
 signals:

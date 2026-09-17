@@ -1279,7 +1279,7 @@ void WebServer::handleWatermarkGenerate(QTcpSocket* socket, const HttpRequest& r
         QDir().mkpath(tempDir);
         QString tempDocxPath = tempDir + "/" + record.receiveNumber + ".docx";
         QFile::copy(outDocx, tempDocxPath);
-        processWatermarkGeneration(socket, tempDir, tempDocxPath, username);
+        processWatermarkGeneration(socket, tempDir, tempDocxPath, username, record.suggestion);
         return;
     }
 
@@ -1555,7 +1555,7 @@ void WebServer::processBatchDownloadFiles(QTcpSocket* socket, const QList<FileIn
     }
 }
 
-void WebServer::processWatermarkGeneration(QTcpSocket* socket, const QString& tempDir, const QString& tempFilePath, const QString& username) {
+void WebServer::processWatermarkGeneration(QTcpSocket* socket, const QString& tempDir, const QString& tempFilePath, const QString& username, const QString& suggestionText) {
     HttpResponse response;
 
     QString originalFileName = QFileInfo(tempFilePath).fileName();
@@ -1565,7 +1565,8 @@ void WebServer::processWatermarkGeneration(QTcpSocket* socket, const QString& te
     WatermarkService::WatermarkResult watermarkResult = watermarkService_->generateWatermarkedImages(
         tempFilePath,
         tempDir,
-        originalFileName
+        originalFileName,
+        suggestionText
     );
     qDebug() << "[Watermark] generateWatermarkedImages returned, success:" << watermarkResult.success;
 
