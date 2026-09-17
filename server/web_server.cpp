@@ -1272,13 +1272,23 @@ void WebServer::handleWatermarkGenerate(QTcpSocket* socket, const HttpRequest& r
             sendResponse(socket, response);
             return;
         }
+        qDebug() << "[Watermark] generateDocument returned:" << generated << "outDocx:" << outDocx;
         AuditLogger::instance()->log(username, AuditAction::DownloadFile,
                                      record.receiveNumber, socket->peerAddress().toString(), true);
         // 创建临时目录用于水印处理
         QString tempDir = QDir::tempPath() + "/crossnet_wm_approval_" + QString::number(QDateTime::currentMSecsSinceEpoch());
         QDir().mkpath(tempDir);
         QString tempDocxPath = tempDir + "/" + record.receiveNumber + ".docx";
-        QFile::copy(outDocx, tempDocxPath);
+        if (!QFile::copy(outDocx, tempDocxPath)) {
+            qDebug() << "[Watermark] Failed to copy" << outDocx << "to" << tempDocxPath;
+            response.statusCode = 500;
+            response.statusText = "Internal Server Error";
+            response.headers["Content-Type"] = "application/json; charset=utf-8";
+            response.body = jsonResponse({{"success", false}, {"error", "无法复制生成的文档"}});
+            sendResponse(socket, response);
+            return;
+        }
+        qDebug() << "[Watermark] Copied to tempDocxPath:" << tempDocxPath;
         processWatermarkGeneration(socket, tempDir, tempDocxPath, username, record.suggestion);
         return;
     }

@@ -408,6 +408,12 @@ QString DbManager::generateDocument(const ApprovalRecord& record,
     QString pdfPath = obj.value("pdf_path").toString();
     QString docxPath = obj.value("docx_path").toString();
 
+    // v2不生成PDF，只返回DOCX
+    if (docxPath.isEmpty()) {
+        errorMessage = "脚本未返回docx_path";
+        return "";
+    }
+
     // 将文件复制到持久临时目录（否则 QTemporaryDir 析构会删）
     static int s_counter = 0;
     QString persistDir = QDir::temp().filePath(QString("cns_docs_%1_%2").arg(QCoreApplication::applicationPid()).arg(++s_counter));
@@ -421,12 +427,17 @@ QString DbManager::generateDocument(const ApprovalRecord& record,
         // fallback: 直接使用临时路径（用户关闭前仍存在）
         finalDocx = docxPath;
     }
-    if (!QFile::copy(pdfPath, finalPdf)) {
-        finalPdf = pdfPath;
+    // PDF由v2版本不生成，留空（水印流程只需要DOCX）
+    if (!pdfPath.isEmpty() && QFile::exists(pdfPath)) {
+        if (!QFile::copy(pdfPath, finalPdf)) {
+            finalPdf = pdfPath;
+        }
+    } else {
+        finalPdf = "";  // v2不生成PDF
     }
     outputDocxPath = finalDocx;
     outputPdfPath = finalPdf;
-    return finalPdf;
+    return finalDocx;  // 返回DOCX路径（水印流程使用）
 }
 
 }
