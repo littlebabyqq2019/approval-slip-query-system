@@ -78,11 +78,26 @@ def find_span_cell_by_first_label(table, row_idx, first_label):
     return row.cells[-1] if row.cells else None
 
 
+def count_chars(text):
+    """
+    计算字符数：汉字算1个字，英文字母/数字算0.5个字
+    """
+    count = 0.0
+    for ch in text:
+        if '一' <= ch <= '鿿':  # 汉字范围
+            count += 1.0
+        elif ch.isalpha() or ch.isdigit():  # 英文字母或数字
+            count += 0.5
+        else:  # 其他字符（标点等）也算1个
+            count += 1.0
+    return count
+
 def set_cell_text(cell, text, table=None, row_idx=None):
     """设置单元格文本，使用仿宋-GB2312字体，四号(14pt)。
 
     支持多行文本：按换行符分割为多个段落，第二段及之后添加首行缩进2字符。
     文件标题中"（注意密级管理）"显示为红色。
+    文件标题行根据字数自动调整行距（防止撑破表格）。
     """
     if cell is None:
         return
@@ -98,8 +113,9 @@ def set_cell_text(cell, text, table=None, row_idx=None):
     for run in first_para.runs:
         run.text = ''
 
-    # 检测是否为文件标题（row_idx == 4）且包含"（注意密级管理）"
-    is_title_with_secret = (row_idx == 4) and '（注意密级管理）' in lines[0]
+    # 检测是否为文件标题（row_idx == 4）
+    is_title_row = (row_idx == 4)
+    is_title_with_secret = is_title_row and '（注意密级管理）' in lines[0]
 
     if is_title_with_secret:
         # 拆分文本为：前缀 + "（注意密级管理）" + 后缀
@@ -134,6 +150,17 @@ def set_cell_text(cell, text, table=None, row_idx=None):
             first_run = first_para.add_run()
         first_run.text = lines[0]
         _apply_content_font(first_run)
+
+    # 文件标题行：根据字数设置行距
+    if is_title_row and lines[0]:
+        char_count = count_chars(lines[0])
+        from docx.shared import Pt
+        if char_count <= 52:
+            first_para.paragraph_format.line_spacing = Pt(28)
+        elif char_count <= 79:
+            first_para.paragraph_format.line_spacing = Pt(22)
+        else:
+            first_para.paragraph_format.line_spacing = Pt(16)
 
     # 处理多行（从第二行开始）
     while len(cell.paragraphs) > len(lines):
