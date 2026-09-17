@@ -82,6 +82,7 @@ def set_cell_text(cell, text, table=None, row_idx=None):
     """设置单元格文本，使用仿宋-GB2312字体，四号(14pt)。
 
     支持多行文本：按换行符分割为多个段落，第二段及之后添加首行缩进2字符。
+    文件标题中"（注意密级管理）"显示为红色。
     """
     if cell is None:
         return
@@ -93,16 +94,48 @@ def set_cell_text(cell, text, table=None, row_idx=None):
     first_para = cell.paragraphs[0]
     lines = text.split('\n') if text else ['']
 
+    # 清空现有runs
     for run in first_para.runs:
         run.text = ''
 
-    if first_para.runs:
-        first_run = first_para.runs[0]
-    else:
-        first_run = first_para.add_run()
-    first_run.text = lines[0]
-    _apply_content_font(first_run)
+    # 检测是否为文件标题（row_idx == 4）且包含"（注意密级管理）"
+    is_title_with_secret = (row_idx == 4) and '（注意密级管理）' in lines[0]
 
+    if is_title_with_secret:
+        # 拆分文本为：前缀 + "（注意密级管理）" + 后缀
+        parts = lines[0].split('（注意密级管理）')
+        if len(parts) == 2:
+            # 前缀（黑色）
+            if parts[0]:
+                run = first_para.add_run(parts[0])
+                _apply_content_font(run)
+            # "（注意密级管理）"（红色）
+            run_red = first_para.add_run('（注意密级管理）')
+            _apply_content_font(run_red)
+            from docx.shared import RGBColor
+            run_red.font.color.rgb = RGBColor(255, 0, 0)
+            # 后缀（黑色）
+            if parts[1]:
+                run = first_para.add_run(parts[1])
+                _apply_content_font(run)
+        else:
+            # 多个匹配，简单处理：全部黑色
+            if first_para.runs:
+                first_run = first_para.runs[0]
+            else:
+                first_run = first_para.add_run()
+            first_run.text = lines[0]
+            _apply_content_font(first_run)
+    else:
+        # 普通文本（黑色）
+        if first_para.runs:
+            first_run = first_para.runs[0]
+        else:
+            first_run = first_para.add_run()
+        first_run.text = lines[0]
+        _apply_content_font(first_run)
+
+    # 处理多行（从第二行开始）
     while len(cell.paragraphs) > len(lines):
         p = cell.paragraphs[-1]
         p._element.getparent().remove(p._element)

@@ -383,16 +383,23 @@ function autoFitFont(el){
   }
   el.style.fontSize = '8pt';
 }
-/* 行数过多 → 压缩行距（只在真的放不下时才动） */
+/* 行数过多 → 压缩行距（只在真的放不下时才动）
+   文件标题行默认行距从 1.2 改为 1.3，标题过长时再压缩 */
 function autoFitLine(el){
   var max = el.clientHeight - parseFloat(getComputedStyle(el).paddingTop || 0)
                             - parseFloat(getComputedStyle(el).paddingBottom || 0);
   /* 测量期间临时改顶对齐：居中时内容向上溢出，scrollHeight 会测不准 */
   var oldJustify = el.style.justifyContent;
   el.style.justifyContent = 'flex-start';
-  for(var lh = 1.2; lh >= 0.95; lh -= 0.05){
-    el.style.lineHeight = lh;
-    if(el.scrollHeight <= max + 0.5) break;
+
+  // 文件标题：默认行距 1.3（增加间距），过长时压缩到 0.95
+  var startLineHeight = 1.3;
+  el.style.lineHeight = startLineHeight;
+  if(el.scrollHeight > max + 0.5){
+    for(var lh = startLineHeight; lh >= 0.95; lh -= 0.05){
+      el.style.lineHeight = lh;
+      if(el.scrollHeight <= max + 0.5) break;
+    }
   }
   el.style.justifyContent = oldJustify;
 }
@@ -402,6 +409,12 @@ function setCell(el, v){
   v = (v == null) ? '' : String(v);
   el.style.fontSize = '';
   el.style.lineHeight = '';
+
+  // 检测是否为文件标题且包含"（注意密级管理）"
+  var isTitleWithSecret = el.hasAttribute('data-field') &&
+                          el.getAttribute('data-field') === 'wenjianBiaoti' &&
+                          v.indexOf('（注意密级管理）') !== -1;
+
   if(el.classList.contains('paras')){
     el.innerHTML = '';
     v.split(/\r?\n/).forEach(function(line){
@@ -411,6 +424,31 @@ function setCell(el, v){
       d.textContent = line;
       el.appendChild(d);
     });
+  }else if(isTitleWithSecret){
+    // 文件标题包含"（注意密级管理）"，将其标红
+    el.innerHTML = '';
+    var parts = v.split('（注意密级管理）');
+    if(parts.length === 2){
+      // 前缀（黑色）
+      if(parts[0]){
+        var span1 = document.createElement('span');
+        span1.textContent = parts[0];
+        el.appendChild(span1);
+      }
+      // "（注意密级管理）"（红色）
+      var spanRed = document.createElement('span');
+      spanRed.textContent = '（注意密级管理）';
+      spanRed.style.color = '#FF0000';
+      el.appendChild(spanRed);
+      // 后缀（黑色）
+      if(parts[1]){
+        var span2 = document.createElement('span');
+        span2.textContent = parts[1];
+        el.appendChild(span2);
+      }
+    }else{
+      el.textContent = v;
+    }
   }else{
     el.textContent = v;
   }
