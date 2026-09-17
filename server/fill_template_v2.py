@@ -38,23 +38,81 @@ def format_date(date_str):
             return date_str
     return date_str
 
-def replace_text_in_xml(xml_content, replacements):
+def fill_table_cells(xml_content, data):
     """
-    在XML内容中替换文本（保留格式）
-    replacements: dict { placeholder: value }
+    在document.xml中填充表格单元格（按行列位置）
+    模板表格结构（10行）：
+    行0: 标题行
+    行1列2-11: 来文单位 (DEPARTMENT)
+    行2列2-5: 来文字号 (WORD_CODE), 列9-11: 收文日期 (FILE_RECEIVE_DATE)
+    行3列2-5: 来文类型 (FILE_CATEGORY), 列9-11: 收文途径 (RECEIVE_CHANNEL)
+    行4列2: 紧急程度 (EMERGENCY_LEVEL), 列4-5: 密级 (SECRET_LEVEL), 列9-11: 收文编号 (RECEIVE_NUMBER)
+    行5列1-11: 文件标题 (SUMMARY)
+    行6列1-11: 领导批示 (LEADER_INSTRUCTION)
+    行7列1-11: 拟办意见 (SUGGESTION)
+    行8-9: 传阅（留空）
+    行10列1-11: 办理结果 (PROCESS_RESULT)
     """
-    ns = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
+    ns = {
+        'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
+        'ns0': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+    }
+
     try:
         root = ET.fromstring(xml_content)
-    except ET.ParseError:
+    except ET.ParseError as e:
+        print(f"XML parse error: {e}", file=sys.stderr)
         return xml_content
 
-    # 遍历所有<w:t>标签
-    for t_elem in root.findall('.//w:t', ns):
-        if t_elem.text:
-            for placeholder, value in replacements.items():
-                if placeholder in t_elem.text:
-                    t_elem.text = t_elem.text.replace(placeholder, value)
+    # 查找第一个表格
+    tables = root.findall('.//w:tbl', ns) or root.findall('.//ns0:tbl', ns)
+    if not tables:
+        print("Warning: No table found in document.xml", file=sys.stderr)
+        return ET.tostring(root, encoding='unicode')
+
+    table = tables[0]
+    rows = table.findall('.//w:tr', ns) or table.findall('.//ns0:tr', ns)
+    if len(rows) < 11:
+        print(f"Warning: Expected 11+ rows, found {len(rows)}", file=sys.stderr)
+
+    def set_cell_text(row_idx, col_range, text):
+        """设置指定行的列范围的文本"""
+        if row_idx >= len(rows):
+            return
+        row = rows[row_idx]
+        cells = row.findall('.//w:tc', ns) or row.findall('.//ns0:tc', ns)
+
+        if isinstance(col_range, int):
+            col_range = [col_range]
+
+        for col_idx in col_range:
+            if col_idx >= len(cells):
+                continue
+            cell = cells[col_idx]
+            # 查找单元格中的第一个<w:t>或<ns0:t>标签
+            t_elems = cell.findall('.//w:t', ns) or cell.findall('.//ns0:t', ns)
+            if t_elems:
+                # 清空其他<w:t>，只保留第一个
+                for t_elem in t_elems[1:]:
+                    parent = t_elem.getparent()
+                    if parent is not None:
+                        parent.remove(t_elem)
+                t_elems[0].text = text
+                break  # 只填充第一个匹配的列
+
+    # 填充数据（对应旧版fill_template.py的表格映射）
+    set_cell_text(1, range(2, 12), data.get('DEPARTMENT', ''))  # 来文单位
+    set_cell_text(2, range(2, 6), data.get('WORD_CODE', ''))  # 来文字号
+    set_cell_text(2, range(9, 12), format_date(data.get('FILE_RECEIVE_DATE', '')))  # 收文日期
+    set_cell_text(3, range(2, 6), data.get('FILE_CATEGORY', ''))  # 来文类型
+    set_cell_text(3, range(9, 12), data.get('RECEIVE_CHANNEL', ''))  # 收文途径
+    set_cell_text(4, [2], data.get('EMERGENCY_LEVEL', ''))  # 紧急程度
+    set_cell_text(4, range(4, 6), data.get('SECRET_LEVEL', ''))  # 密级
+    set_cell_text(4, range(9, 12), data.get('RECEIVE_NUMBER', ''))  # 收文编号
+    set_cell_text(5, range(1, 12), data.get('SUMMARY', ''))  # 文件标题
+    set_cell_text(6, range(1, 12), data.get('LEADER_INSTRUCTION', ''))  # 领导批示
+    set_cell_text(7, range(1, 12), data.get('SUGGESTION', ''))  # 拟办意见
+    set_cell_text(10, range(1, 12), data.get('PROCESS_RESULT', ''))  # 办理结果
 
     return ET.tostring(root, encoding='unicode')
 
@@ -62,20 +120,6 @@ def fill_template(template_path, output_path, data):
     """
     填充Word模板（使用zipfile + raw XML）
     """
-    # 准备替换字典
-    replacements = {
-        '【文件标题】': data.get('文件标题', ''),
-        '【文号】': data.get('文号', ''),
-        '【来文单位】': data.get('来文单位', ''),
-        '【收文日期】': format_date(data.get('收文日期', '')),
-        '【打印日期】': format_date(data.get('打印日期', datetime.now().strftime('%Y-%m-%d'))),
-        '【经办人】': data.get('经办人', ''),
-        '【拟办意见】': data.get('拟办意见', ''),
-        '【批办领导】': data.get('批办领导', ''),
-        '【批办意见】': data.get('批办意见', ''),
-        '【办理结果】': data.get('办理结果', ''),
-    }
-
     # 打开模板DOCX (ZIP archive)
     with zipfile.ZipFile(template_path, 'r') as template_zip:
         # 创建输出DOCX
@@ -87,10 +131,12 @@ def fill_template(template_path, output_path, data):
                 if item.filename == 'word/document.xml':
                     try:
                         xml_str = data_bytes.decode('utf-8')
-                        xml_str = replace_text_in_xml(xml_str, replacements)
+                        xml_str = fill_table_cells(xml_str, data)
                         data_bytes = xml_str.encode('utf-8')
                     except Exception as e:
-                        print(f"Warning: failed to replace in {item.filename}: {e}", file=sys.stderr)
+                        print(f"Warning: failed to fill table in {item.filename}: {e}", file=sys.stderr)
+                        import traceback
+                        traceback.print_exc(file=sys.stderr)
 
                 output_zip.writestr(item, data_bytes)
 
@@ -113,19 +159,8 @@ def main():
         print(f"读取record.json失败: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # 映射字段
-    data = {
-        '文件标题': record.get('SUMMARY', ''),
-        '文号': record.get('WORD_CODE', ''),
-        '来文单位': record.get('DEPARTMENT', ''),
-        '收文日期': record.get('FILE_RECEIVE_DATE', ''),
-        '打印日期': datetime.now().strftime('%Y-%m-%d'),
-        '经办人': record.get('OPERATOR', ''),
-        '拟办意见': record.get('SUGGESTION', ''),
-        '批办领导': record.get('LEADER', ''),
-        '批办意见': record.get('LEADER_INSTRUCTION', ''),
-        '办理结果': record.get('PROCESS_RESULT', ''),
-    }
+    # 直接传递record字段（不做映射，因为fill_table_cells按字段名匹配）
+    data = record
 
     # 生成输出文件名
     receive_number = record.get('RECEIVE_NUMBER', 'unknown')
@@ -137,6 +172,8 @@ def main():
         fill_template(template_path, docx_path, data)
     except Exception as e:
         print(f"填充失败: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
         sys.exit(1)
 
     # 返回JSON结果（兼容db_manager.cpp的解析）
@@ -150,4 +187,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
