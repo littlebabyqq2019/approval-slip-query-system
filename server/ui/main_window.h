@@ -9,6 +9,7 @@
 #include <QPushButton>
 #include <QLabel>
 #include <QTimer>
+#include <QListWidget>
 #include <QSystemTrayIcon>
 #include <QMenu>
 #include <QFileDialog>
@@ -48,12 +49,14 @@ private slots:
     void onDbDatabaseChanged();
     void saveDatabaseConfig();
     void loadDatabaseConfig();
+    void onDbListItemChanged(QListWidgetItem* item);
 
 private:
     void setupUi();
     void setupTrayIcon();
     void updateServerStatus();
     void appendLog(const QString& message);
+    void updateDbListWidget();
 
     Server* server_;
     WatermarkService* watermarkService_;
@@ -70,6 +73,7 @@ private:
     QLabel* dbStatusLabel_;
     QLabel* statusLabel_;
     QTextEdit* logTextEdit_;
+    QListWidget* dbListWidget_;  // 数据库列表
 
     // 系统托盘
     QSystemTrayIcon* trayIcon_;
