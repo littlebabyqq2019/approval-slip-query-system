@@ -8,6 +8,14 @@ import json
 from xml.etree import ElementTree as ET
 from datetime import datetime
 
+# Force UTF-8 on Windows
+if sys.platform == 'win32':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 # DOCX is a ZIP archive — we use zipfile + raw XML (no python-docx needed)
 
 def format_date(date_str):
@@ -87,28 +95,59 @@ def fill_template(template_path, output_path, data):
                 output_zip.writestr(item, data_bytes)
 
 def main():
-    if len(sys.argv) < 4:
-        print("用法: fill_template_v2.py <模板路径> <输出路径> <JSON数据>", file=sys.stderr)
+    # db_manager.cpp调用: script template record.json outputDir appDir
+    if len(sys.argv) < 5:
+        print("用法: fill_template_v2.py <模板> <record.json> <输出目录> <appDir>", file=sys.stderr)
         sys.exit(1)
 
     template_path = sys.argv[1]
-    output_path = sys.argv[2]
-    json_data = sys.argv[3]
+    record_json_path = sys.argv[2]
+    output_dir = sys.argv[3]
+    # app_dir = sys.argv[4]  # 未使用
 
-    # 解析JSON
+    # 读取record.json
     try:
-        data = json.loads(json_data)
-    except json.JSONDecodeError as e:
-        print(f"JSON解析失败: {e}", file=sys.stderr)
+        with open(record_json_path, 'r', encoding='utf-8-sig') as f:
+            record = json.load(f)
+    except Exception as e:
+        print(f"读取record.json失败: {e}", file=sys.stderr)
         sys.exit(1)
+
+    # 映射字段
+    data = {
+        '文件标题': record.get('SUMMARY', ''),
+        '文号': record.get('WORD_CODE', ''),
+        '来文单位': record.get('DEPARTMENT', ''),
+        '收文日期': record.get('FILE_RECEIVE_DATE', ''),
+        '打印日期': datetime.now().strftime('%Y-%m-%d'),
+        '经办人': record.get('OPERATOR', ''),
+        '拟办意见': record.get('SUGGESTION', ''),
+        '批办领导': record.get('LEADER', ''),
+        '批办意见': record.get('LEADER_INSTRUCTION', ''),
+        '办理结果': record.get('PROCESS_RESULT', ''),
+    }
+
+    # 生成输出文件名
+    receive_number = record.get('RECEIVE_NUMBER', 'unknown')
+    filename = receive_number.replace('/', '-')
+    docx_path = os.path.join(output_dir, f"{filename}.docx")
 
     # 执行填充
     try:
-        fill_template(template_path, output_path, data)
-        print("SUCCESS")
+        fill_template(template_path, docx_path, data)
     except Exception as e:
         print(f"填充失败: {e}", file=sys.stderr)
         sys.exit(1)
 
+    # 返回JSON结果（兼容db_manager.cpp的解析）
+    result = {
+        "success": True,
+        "docx_path": docx_path,
+        "pdf_path": "",  # v2不生成PDF
+        "filename": filename
+    }
+    print(json.dumps(result, ensure_ascii=False))
+
 if __name__ == "__main__":
     main()
+
