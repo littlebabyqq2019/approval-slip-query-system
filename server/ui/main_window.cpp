@@ -649,6 +649,9 @@ void MainWindow::loadDatabaseConfig() {
 }
 
 void MainWindow::updateDbListWidget() {
+    // 阻止信号，避免 setCheckState 触发 itemChanged
+    dbListWidget_->blockSignals(true);
+
     dbListWidget_->clear();
     QStringList dbList = DbManager::instance()->getDatabaseList();
     QString activeDb = DbManager::instance()->getActiveDatabase();
@@ -661,6 +664,9 @@ void MainWindow::updateDbListWidget() {
         item->setData(Qt::UserRole, dbPath);  // 存储原始路径
         dbListWidget_->addItem(item);
     }
+
+    // 恢复信号
+    dbListWidget_->blockSignals(false);
 }
 
 void MainWindow::onDbListItemChanged(QListWidgetItem* item) {
@@ -678,6 +684,9 @@ void MainWindow::onDbListItemChanged(QListWidgetItem* item) {
             dbStatusLabel_->setStyleSheet("font-size: 9pt; color: #166534; padding: 4px 10px; background-color: #dcfce7; border-radius: 4px;");
             appendLog("切换数据库: " + dbPath);
 
+            // 阻止信号，避免取消勾选时触发 itemChanged
+            dbListWidget_->blockSignals(true);
+
             // 取消其他项的勾选
             for (int i = 0; i < dbListWidget_->count(); ++i) {
                 QListWidgetItem* otherItem = dbListWidget_->item(i);
@@ -686,9 +695,16 @@ void MainWindow::onDbListItemChanged(QListWidgetItem* item) {
                 }
             }
 
+            // 恢复信号
+            dbListWidget_->blockSignals(false);
+
             saveDatabaseConfig();
         } else {
+            // 阻止信号，避免取消勾选时再次触发
+            dbListWidget_->blockSignals(true);
             item->setCheckState(Qt::Unchecked);
+            dbListWidget_->blockSignals(false);
+
             dbStatusLabel_->setText("加载数据库失败: " + dbPath);
             dbStatusLabel_->setStyleSheet("font-size: 9pt; color: #991b1b; padding: 4px 10px; background-color: #fee2e2; border-radius: 4px;");
         }
@@ -714,8 +730,10 @@ void MainWindow::onDbListItemChanged(QListWidgetItem* item) {
                 dbStatusLabel_->setStyleSheet("font-size: 9pt; color: #92400e; padding: 4px 10px; background-color: #fef3c7; border-radius: 4px;");
             }
         } else {
-            // 用户取消，恢复勾选状态
+            // 用户取消，恢复勾选状态（阻止信号避免递归）
+            dbListWidget_->blockSignals(true);
             item->setCheckState(Qt::Checked);
+            dbListWidget_->blockSignals(false);
         }
     }
 }
