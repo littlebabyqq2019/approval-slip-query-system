@@ -547,6 +547,9 @@ void MainWindow::onAddRemoteDatabaseClicked() {
     appendLog("添加远程数据库: " + connStr);
     DbManager::instance()->addDatabase(connStr);
 
+    // 更新列表显示
+    updateDbListWidget();
+
     dbPathLineEdit_->setText(connStr);
     bool ok = DbManager::instance()->setActiveDatabase(connStr);
     if (ok) {
