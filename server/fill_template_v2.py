@@ -5,6 +5,7 @@ import sys
 import zipfile
 import os
 import json
+import re
 from xml.etree import ElementTree as ET
 from datetime import datetime
 
@@ -16,47 +17,106 @@ if sys.platform == 'win32':
     except Exception:
         pass
 
-# DOCX is a ZIP archive — we use zipfile + raw XML (no python-docx needed)
-
 def format_date(date_str):
-    """
-    格式化日期字符串,去掉前导零
-    输入: '2025-02-05', '2025-2-5', '2025年02月05日' 等
-    输出: '2025-2-5'
-    """
+    """格式化日期字符串,去掉前导零"""
     if not date_str:
         return ''
-    # 移除年月日
     date_str = date_str.replace('年', '-').replace('月', '-').replace('日', '')
-    # 分割日期
     parts = date_str.split('-')
     if len(parts) == 3:
-        # 转换为整数再转回字符串,自动去掉前导零
         try:
             return f"{int(parts[0])}-{int(parts[1])}-{int(parts[2])}"
         except ValueError:
             return date_str
     return date_str
 
-def fill_table_cells(xml_content, data):
+def get_cell_text(cell_elem, ns):
+    """提取单元格内的所有文本"""
+    texts = []
+    for t_elem in cell_elem.findall('.//w:t', ns):
+        if t_elem.text:
+            texts.append(t_elem.text)
+    return ''.join(texts)
+
+def set_cell_text(cell_elem, new_text, ns):
+    """设置单元格文本（清空现有<w:t>并设置第一个）"""
+    if not new_text:
+        return
+
+    # 查找所有<w:t>
+    t_elems = cell_elem.findall('.//w:t', ns)
+    if not t_elems:
+        return
+
+    # 设置第一个<w:t>的文本
+    t_elems[0].text = new_text
+
+    # 清空其他<w:t>
+    for t_elem in t_elems[1:]:
+        t_elem.text = ''
+
+def find_content_cell_after_label(row_elem, label, ns):
     """
-    在document.xml中填充表格单元格（按行列位置）
-    模板表格结构（10行）：
-    行0: 标题行
-    行1列2-11: 来文单位 (DEPARTMENT)
-    行2列2-5: 来文字号 (WORD_CODE), 列9-11: 收文日期 (FILE_RECEIVE_DATE)
-    行3列2-5: 来文类型 (FILE_CATEGORY), 列9-11: 收文途径 (RECEIVE_CHANNEL)
-    行4列2: 紧急程度 (EMERGENCY_LEVEL), 列4-5: 密级 (SECRET_LEVEL), 列9-11: 收文编号 (RECEIVE_NUMBER)
-    行5列1-11: 文件标题 (SUMMARY)
-    行6列1-11: 领导批示 (LEADER_INSTRUCTION)
-    行7列1-11: 拟办意见 (SUGGESTION)
-    行8-9: 传阅（留空）
-    行10列1-11: 办理结果 (PROCESS_RESULT)
+    在行中查找标签单元格后的第一个单元格
+    模拟 fill_template.py 的 find_content_cell 逻辑
     """
-    ns = {
-        'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
-        'ns0': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
-    }
+    cells = row_elem.findall('.//w:tc', ns)
+
+    # 查找包含标签文本的单元格
+    label_indices = []
+    for i, cell in enumerate(cells):
+        cell_text = get_cell_text(cell, ns).strip()
+        if label in cell_text:
+            label_indices.append(i)
+
+    if not label_indices:
+        return None
+
+    # 取最后一个标签单元格的下一个
+    last_label_idx = label_indices[-1]
+    content_idx = last_label_idx + 1
+
+    if content_idx < len(cells):
+        return cells[content_idx]
+
+    return None
+
+def find_span_cell_by_first_label(row_elem, label, ns):
+    """
+    查找标签后的第一个空白单元格（用于跨列大单元格）
+    模拟 fill_template.py 的 find_span_cell_by_first_label 逻辑
+    """
+    cells = row_elem.findall('.//w:tc', ns)
+
+    # 查找包含标签的单元格
+    label_indices = []
+    for i, cell in enumerate(cells):
+        cell_text = get_cell_text(cell, ns).strip()
+        if label in cell_text:
+            label_indices.append(i)
+
+    start_idx = 1  # 默认从第二列开始
+    if label_indices:
+        start_idx = label_indices[-1] + 1
+
+    # 查找第一个空白单元格
+    for i in range(start_idx, len(cells)):
+        cell_text = get_cell_text(cells[i], ns).strip()
+        if not cell_text:
+            return cells[i]
+
+    # 如果没有空白单元格，返回最后一个
+    if cells:
+        return cells[-1]
+
+    return None
+
+def fill_table_in_document(xml_content, data):
+    """
+    使用 python-docx 兼容的逻辑填充表格
+    通过标签文本查找单元格，而不是硬编码行列
+    """
+    ns = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
 
     try:
         root = ET.fromstring(xml_content)
@@ -65,83 +125,110 @@ def fill_table_cells(xml_content, data):
         return xml_content
 
     # 查找第一个表格
-    tables = root.findall('.//w:tbl', ns) or root.findall('.//ns0:tbl', ns)
+    tables = root.findall('.//w:tbl', ns)
     if not tables:
         print("Warning: No table found in document.xml", file=sys.stderr)
         return ET.tostring(root, encoding='unicode')
 
     table = tables[0]
-    rows = table.findall('.//w:tr', ns) or table.findall('.//ns0:tr', ns)
-    if len(rows) < 11:
-        print(f"Warning: Expected 11+ rows, found {len(rows)}", file=sys.stderr)
+    rows = table.findall('.//w:tr', ns)
 
-    def set_cell_text(row_idx, col_range, text):
-        """设置指定行的列范围的文本"""
-        if row_idx >= len(rows):
-            return
-        row = rows[row_idx]
-        cells = row.findall('.//w:tc', ns) or row.findall('.//ns0:tc', ns)
+    if len(rows) < 10:
+        print(f"Warning: Expected 10+ rows, found {len(rows)}", file=sys.stderr)
 
-        if isinstance(col_range, int):
-            col_range = [col_range]
+    # 按照 fill_template.py 的映射逻辑填充
+    # 行索引从0开始
 
-        for col_idx in col_range:
-            if col_idx >= len(cells):
-                continue
-            cell = cells[col_idx]
-            # 查找单元格中的第一个<w:t>或<ns0:t>标签
-            t_elems = cell.findall('.//w:t', ns) or cell.findall('.//ns0:t', ns)
-            if t_elems:
-                # 清空其他<w:t>，只保留第一个
-                for t_elem in t_elems[1:]:
-                    parent = t_elem.getparent()
-                    if parent is not None:
-                        parent.remove(t_elem)
-                t_elems[0].text = text
-                break  # 只填充第一个匹配的列
+    # 行0 (第1行): 来文单位
+    if len(rows) > 0:
+        cell = find_content_cell_after_label(rows[0], '来文单位', ns)
+        if cell:
+            set_cell_text(cell, data.get('DEPARTMENT', ''), ns)
 
-    # 填充数据（对应旧版fill_template.py的表格映射）
-    set_cell_text(1, range(2, 12), data.get('DEPARTMENT', ''))  # 来文单位
-    set_cell_text(2, range(2, 6), data.get('WORD_CODE', ''))  # 来文字号
-    set_cell_text(2, range(9, 12), format_date(data.get('FILE_RECEIVE_DATE', '')))  # 收文日期
-    set_cell_text(3, range(2, 6), data.get('FILE_CATEGORY', ''))  # 来文类型
-    set_cell_text(3, range(9, 12), data.get('RECEIVE_CHANNEL', ''))  # 收文途径
-    set_cell_text(4, [2], data.get('EMERGENCY_LEVEL', ''))  # 紧急程度
-    set_cell_text(4, range(4, 6), data.get('SECRET_LEVEL', ''))  # 密级
-    set_cell_text(4, range(9, 12), data.get('RECEIVE_NUMBER', ''))  # 收文编号
-    set_cell_text(5, range(1, 12), data.get('SUMMARY', ''))  # 文件标题
-    set_cell_text(6, range(1, 12), data.get('LEADER_INSTRUCTION', ''))  # 领导批示
-    set_cell_text(7, range(1, 12), data.get('SUGGESTION', ''))  # 拟办意见
-    set_cell_text(10, range(1, 12), data.get('PROCESS_RESULT', ''))  # 办理结果
+    # 行1 (第2行): 来文字号、收文日期
+    if len(rows) > 1:
+        cell = find_content_cell_after_label(rows[1], '来文字号', ns)
+        if cell:
+            set_cell_text(cell, data.get('WORD_CODE', ''), ns)
+
+        cell = find_content_cell_after_label(rows[1], '收文日期', ns)
+        if cell:
+            set_cell_text(cell, format_date(data.get('FILE_RECEIVE_DATE', '')), ns)
+
+    # 行2 (第3行): 来文类型、收文途径
+    if len(rows) > 2:
+        cell = find_content_cell_after_label(rows[2], '来文类型', ns)
+        if cell:
+            set_cell_text(cell, data.get('FILE_CATEGORY', ''), ns)
+
+        cell = find_content_cell_after_label(rows[2], '收文途径', ns)
+        if cell:
+            set_cell_text(cell, data.get('RECEIVE_CHANNEL', ''), ns)
+
+    # 行3 (第4行): 紧急程度、密级、收文编号
+    if len(rows) > 3:
+        cell = find_content_cell_after_label(rows[3], '紧急程度', ns)
+        if cell:
+            set_cell_text(cell, data.get('EMERGENCY_LEVEL', ''), ns)
+
+        cell = find_content_cell_after_label(rows[3], '密 级', ns)
+        if not cell:
+            cell = find_content_cell_after_label(rows[3], '密级', ns)
+        if cell:
+            set_cell_text(cell, data.get('SECRET_LEVEL', ''), ns)
+
+        cell = find_content_cell_after_label(rows[3], '收文编号', ns)
+        if cell:
+            set_cell_text(cell, data.get('RECEIVE_NUMBER', ''), ns)
+
+    # 行4 (第5行): 文件标题 (跨列大单元格)
+    if len(rows) > 4:
+        cell = find_span_cell_by_first_label(rows[4], '文件标题', ns)
+        if cell:
+            set_cell_text(cell, data.get('SUMMARY', ''), ns)
+
+    # 行5 (第6行): 领导批示
+    if len(rows) > 5:
+        cell = find_span_cell_by_first_label(rows[5], '领导批示', ns)
+        if cell:
+            set_cell_text(cell, data.get('LEADER_INSTRUCTION', ''), ns)
+
+    # 行6 (第7行): 拟办意见
+    if len(rows) > 6:
+        cell = find_span_cell_by_first_label(rows[6], '拟办意见', ns)
+        if cell:
+            set_cell_text(cell, data.get('SUGGESTION', ''), ns)
+
+    # 行7-8: 传阅 (留空)
+
+    # 行9 (第10行): 办理结果
+    if len(rows) > 9:
+        cell = find_span_cell_by_first_label(rows[9], '办理结果', ns)
+        if cell:
+            set_cell_text(cell, data.get('PROCESS_RESULT', ''), ns)
 
     return ET.tostring(root, encoding='unicode')
 
 def fill_template(template_path, output_path, data):
-    """
-    填充Word模板（使用zipfile + raw XML）
-    """
-    # 打开模板DOCX (ZIP archive)
+    """填充Word模板（使用zipfile + raw XML）"""
     with zipfile.ZipFile(template_path, 'r') as template_zip:
-        # 创建输出DOCX
         with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as output_zip:
             for item in template_zip.infolist():
                 data_bytes = template_zip.read(item.filename)
 
-                # 只处理word/document.xml（主体内容）
                 if item.filename == 'word/document.xml':
                     try:
                         xml_str = data_bytes.decode('utf-8')
-                        xml_str = fill_table_cells(xml_str, data)
+                        xml_str = fill_table_in_document(xml_str, data)
                         data_bytes = xml_str.encode('utf-8')
                     except Exception as e:
-                        print(f"Warning: failed to fill table in {item.filename}: {e}", file=sys.stderr)
+                        print(f"Error filling table: {e}", file=sys.stderr)
                         import traceback
                         traceback.print_exc(file=sys.stderr)
 
                 output_zip.writestr(item, data_bytes)
 
 def main():
-    # db_manager.cpp调用: script template record.json outputDir appDir
     if len(sys.argv) < 5:
         print("用法: fill_template_v2.py <模板> <record.json> <输出目录> <appDir>", file=sys.stderr)
         sys.exit(1)
@@ -149,7 +236,6 @@ def main():
     template_path = sys.argv[1]
     record_json_path = sys.argv[2]
     output_dir = sys.argv[3]
-    # app_dir = sys.argv[4]  # 未使用
 
     # 读取record.json
     try:
@@ -159,7 +245,7 @@ def main():
         print(f"读取record.json失败: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # 直接传递record字段（不做映射，因为fill_table_cells按字段名匹配）
+    # 直接传递record（不做字段映射）
     data = record
 
     # 生成输出文件名
@@ -176,11 +262,11 @@ def main():
         traceback.print_exc(file=sys.stderr)
         sys.exit(1)
 
-    # 返回JSON结果（兼容db_manager.cpp的解析）
+    # 返回JSON结果
     result = {
         "success": True,
         "docx_path": docx_path,
-        "pdf_path": "",  # v2不生成PDF
+        "pdf_path": "",
         "filename": filename
     }
     print(json.dumps(result, ensure_ascii=False))

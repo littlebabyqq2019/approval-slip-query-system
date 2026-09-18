@@ -1,6 +1,6 @@
 # Cloude Code ToolBox — MCP & Skills awareness
 
-_Generated: 2026-08-25T09:42:34.940Z_
+_Generated: 2026-09-17T15:48:55.279Z_
 
 ## How to use this report
 
@@ -13,9 +13,9 @@ _Generated: 2026-08-25T09:42:34.940Z_
 
 ## MCP — workspace
 
-Workspace `mcp.json` _(folder: crossnet-share)_
+Workspace `mcp.json` _(folder: Approval Slip Query System)_
 
-- **e:\dev\crossnet-share\.mcp.json** — _File missing_
+- **e:\dev\Approval Slip Query System\.mcp.json** — _File missing_
 
 _No active workspace servers in mcp.json._
 
