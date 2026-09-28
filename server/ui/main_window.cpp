@@ -36,6 +36,7 @@ MainWindow::MainWindow(QWidget* parent)
     , server_(new Server(this))
     , watermarkService_(new WatermarkService(this))
     , cacheCleanupTimer_(new QTimer(this))
+    , dbRefreshTimer_(new QTimer(this))
     , trayIcon_(nullptr)
     , trayMenu_(nullptr)
 {
@@ -72,6 +73,10 @@ MainWindow::MainWindow(QWidget* parent)
 
     connect(cacheCleanupTimer_, &QTimer::timeout, this, &MainWindow::onCleanupCache);
     cacheCleanupTimer_->start(3600000);
+
+    // 数据库自动刷新定时器（每30秒刷新一次远程数据库）
+    connect(dbRefreshTimer_, &QTimer::timeout, this, &MainWindow::onAutoRefreshDatabase);
+    dbRefreshTimer_->start(30000);  // 30秒
 
     updateServerStatus();
 
@@ -262,7 +267,9 @@ void MainWindow::setupUi() {
     dbListWidget_->setStyleSheet(
         "QListWidget { border: 1px solid #d1d5db; border-radius: 4px; padding: 4px; } "
         "QListWidget::item { padding: 4px 8px; } "
-        "QListWidget::item:hover { background-color: #f3f4f6; }"
+        "QListWidget::item:hover { background-color: #f3f4f6; } "
+        "QListWidget::item:selected { background-color: #3b82f6; color: white; } "
+        "QListWidget::item:selected:hover { background-color: #2563eb; color: white; }"
     );
     connect(dbListWidget_, &QListWidget::itemChanged, this, &MainWindow::onDbListItemChanged);
     configMainLayout->addWidget(dbListWidget_);
@@ -586,6 +593,28 @@ void MainWindow::onDbManagerError(const QString& msg) {
     appendLog("[数据库错误] " + msg);
 }
 
+void MainWindow::onAutoRefreshDatabase() {
+    // 自动刷新当前活动数据库
+    QString activeDb = DbManager::instance()->getActiveDatabase();
+    if (activeDb.isEmpty()) {
+        return;
+    }
+
+    // 检查是否是远程数据库（以 jdbc: 开头）
+    if (!activeDb.startsWith("jdbc:", Qt::CaseInsensitive)) {
+        return;
+    }
+
+    // 重新加载数据库
+    bool ok = DbManager::instance()->setActiveDatabase(activeDb);
+    if (ok) {
+        int count = DbManager::instance()->getAllRecords().size();
+        dbStatusLabel_->setText(QString("数据库已加载: %1 (共 %2 条记录)").arg(QDir::toNativeSeparators(activeDb)).arg(count));
+        dbStatusLabel_->setStyleSheet("font-size: 9pt; color: #166534; padding: 4px 10px; background-color: #dcfce7; border-radius: 4px;");
+        qDebug() << "[MainWindow] Auto-refreshed database:" << activeDb << "records:" << count;
+    }
+}
+
 void MainWindow::onDbDatabaseChanged() {
     int count = DbManager::instance()->getAllRecords().size();
     dbStatusLabel_->setText(QString("数据库已加载，共 %1 条记录").arg(count));
@@ -660,85 +689,82 @@ void MainWindow::updateDbListWidget() {
     QString activeDb = DbManager::instance()->getActiveDatabase();
 
     for (const QString& dbPath : dbList) {
+        // 创建自定义 widget 包含数据库路径和删除按钮
+        QWidget* itemWidget = new QWidget();
+        QHBoxLayout* layout = new QHBoxLayout(itemWidget);
+        layout->setContentsMargins(4, 2, 4, 2);
+        layout->setSpacing(8);
+
+        // 复选框
+        QCheckBox* checkbox = new QCheckBox();
+        checkbox->setChecked(dbPath == activeDb);
+        checkbox->setProperty("dbPath", dbPath);
+        connect(checkbox, &QCheckBox::stateChanged, this, [this, dbPath, checkbox](int state) {
+            if (state == Qt::Checked) {
+                // 切换数据库
+                bool ok = DbManager::instance()->setActiveDatabase(dbPath);
+                if (ok) {
+                    dbPathLineEdit_->setText(QDir::toNativeSeparators(dbPath));
+                    int count = DbManager::instance()->getAllRecords().size();
+                    dbStatusLabel_->setText(QString("数据库已加载: %1 (共 %2 条记录)").arg(QDir::toNativeSeparators(dbPath)).arg(count));
+                    dbStatusLabel_->setStyleSheet("font-size: 9pt; color: #166534; padding: 4px 10px; background-color: #dcfce7; border-radius: 4px;");
+                    appendLog("切换数据库: " + dbPath);
+                    saveDatabaseConfig();
+                    updateDbListWidget();
+                } else {
+                    checkbox->setChecked(false);
+                    dbStatusLabel_->setText("加载数据库失败: " + dbPath);
+                    dbStatusLabel_->setStyleSheet("font-size: 9pt; color: #991b1b; padding: 4px 10px; background-color: #fee2e2; border-radius: 4px;");
+                }
+            }
+        });
+        layout->addWidget(checkbox);
+
+        // 数据库路径标签
+        QLabel* label = new QLabel(QDir::toNativeSeparators(dbPath));
+        label->setStyleSheet("font-size: 10pt;");
+        layout->addWidget(label, 1);
+
+        // 删除按钮
+        QPushButton* deleteBtn = new QPushButton("删除");
+        deleteBtn->setStyleSheet(
+            "QPushButton { padding: 2px 8px; font-size: 9pt; background-color: #ef4444; color: white; border: none; border-radius: 3px; } "
+            "QPushButton:hover { background-color: #dc2626; }"
+        );
+        deleteBtn->setMaximumWidth(50);
+        connect(deleteBtn, &QPushButton::clicked, this, [this, dbPath]() {
+            QMessageBox::StandardButton reply = QMessageBox::question(
+                this,
+                "确认删除",
+                "确定要从列表中删除此数据库吗？\n\n" + QDir::toNativeSeparators(dbPath),
+                QMessageBox::Yes | QMessageBox::No
+            );
+            if (reply == QMessageBox::Yes) {
+                DbManager::instance()->removeDatabase(dbPath);
+                appendLog("删除数据库: " + dbPath);
+                saveDatabaseConfig();
+                updateDbListWidget();
+
+                // 如果删除的是当前活动数据库，清空状态
+                if (dbPath == DbManager::instance()->getActiveDatabase()) {
+                    dbPathLineEdit_->clear();
+                    dbStatusLabel_->setText("尚未选择数据库文件");
+                    dbStatusLabel_->setStyleSheet("font-size: 9pt; color: #92400e; padding: 4px 10px; background-color: #fef3c7; border-radius: 4px;");
+                }
+            }
+        });
+        layout->addWidget(deleteBtn);
+
+        itemWidget->setLayout(layout);
+
         QListWidgetItem* item = new QListWidgetItem(dbListWidget_);
-        item->setText(QDir::toNativeSeparators(dbPath));
-        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
-        item->setCheckState(dbPath == activeDb ? Qt::Checked : Qt::Unchecked);
-        item->setData(Qt::UserRole, dbPath);  // 存储原始路径
+        item->setSizeHint(itemWidget->sizeHint());
         dbListWidget_->addItem(item);
+        dbListWidget_->setItemWidget(item, itemWidget);
     }
 
     // 恢复信号
     dbListWidget_->blockSignals(false);
-}
-
-void MainWindow::onDbListItemChanged(QListWidgetItem* item) {
-    if (!item) return;
-
-    QString dbPath = item->data(Qt::UserRole).toString();
-
-    if (item->checkState() == Qt::Checked) {
-        // 勾选：设置为活动数据库
-        bool ok = DbManager::instance()->setActiveDatabase(dbPath);
-        if (ok) {
-            dbPathLineEdit_->setText(QDir::toNativeSeparators(dbPath));
-            int count = DbManager::instance()->getAllRecords().size();
-            dbStatusLabel_->setText(QString("数据库已加载: %1 (共 %2 条记录)").arg(QDir::toNativeSeparators(dbPath)).arg(count));
-            dbStatusLabel_->setStyleSheet("font-size: 9pt; color: #166534; padding: 4px 10px; background-color: #dcfce7; border-radius: 4px;");
-            appendLog("切换数据库: " + dbPath);
-
-            // 阻止信号，避免取消勾选时触发 itemChanged
-            dbListWidget_->blockSignals(true);
-
-            // 取消其他项的勾选
-            for (int i = 0; i < dbListWidget_->count(); ++i) {
-                QListWidgetItem* otherItem = dbListWidget_->item(i);
-                if (otherItem != item && otherItem->checkState() == Qt::Checked) {
-                    otherItem->setCheckState(Qt::Unchecked);
-                }
-            }
-
-            // 恢复信号
-            dbListWidget_->blockSignals(false);
-
-            saveDatabaseConfig();
-        } else {
-            // 阻止信号，避免取消勾选时再次触发
-            dbListWidget_->blockSignals(true);
-            item->setCheckState(Qt::Unchecked);
-            dbListWidget_->blockSignals(false);
-
-            dbStatusLabel_->setText("加载数据库失败: " + dbPath);
-            dbStatusLabel_->setStyleSheet("font-size: 9pt; color: #991b1b; padding: 4px 10px; background-color: #fee2e2; border-radius: 4px;");
-        }
-    } else {
-        // 取消勾选：从列表移除数据库
-        QMessageBox::StandardButton reply = QMessageBox::question(
-            this,
-            "确认移除",
-            "确定要从列表中移除此数据库吗？\n\n" + QDir::toNativeSeparators(dbPath),
-            QMessageBox::Yes | QMessageBox::No
-        );
-
-        if (reply == QMessageBox::Yes) {
-            DbManager::instance()->removeDatabase(dbPath);
-            delete item;
-            appendLog("移除数据库: " + dbPath);
-            saveDatabaseConfig();
-
-            // 如果移除的是当前活动数据库，清空状态
-            if (dbPath == DbManager::instance()->getActiveDatabase()) {
-                dbPathLineEdit_->clear();
-                dbStatusLabel_->setText("尚未选择数据库文件");
-                dbStatusLabel_->setStyleSheet("font-size: 9pt; color: #92400e; padding: 4px 10px; background-color: #fef3c7; border-radius: 4px;");
-            }
-        } else {
-            // 用户取消，恢复勾选状态（阻止信号避免递归）
-            dbListWidget_->blockSignals(true);
-            item->setCheckState(Qt::Checked);
-            dbListWidget_->blockSignals(false);
-        }
-    }
 }
 
 }

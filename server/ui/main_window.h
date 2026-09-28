@@ -50,6 +50,7 @@ private slots:
     void saveDatabaseConfig();
     void loadDatabaseConfig();
     void onDbListItemChanged(QListWidgetItem* item);
+    void onAutoRefreshDatabase();
 
 private:
     void setupUi();
@@ -61,6 +62,7 @@ private:
     Server* server_;
     WatermarkService* watermarkService_;
     QTimer* cacheCleanupTimer_;
+    QTimer* dbRefreshTimer_;  // 数据库自动刷新定时器
 
     // UI控件
     QSpinBox* portSpinBox_;
