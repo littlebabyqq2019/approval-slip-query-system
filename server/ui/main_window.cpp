@@ -767,4 +767,13 @@ void MainWindow::updateDbListWidget() {
     dbListWidget_->blockSignals(false);
 }
 
+void MainWindow::onDbListItemChanged(QListWidgetItem* item) {
+    // 响应数据库列表复选框状态改变
+    if (!item) return;
+
+    // 此处可添加复选框状态改变后的逻辑
+    // 例如：更新服务器配置、重新加载数据库等
+    saveDatabaseConfig();
+}
+
 }
