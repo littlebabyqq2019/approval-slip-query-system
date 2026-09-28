@@ -263,10 +263,10 @@ void MainWindow::setupUi() {
     configMainLayout->addWidget(dbListLabel);
 
     dbListWidget_ = new QListWidget();
-    dbListWidget_->setMaximumHeight(120);
+    dbListWidget_->setMaximumHeight(160);  // 增加列表高度以容纳更大的行
     dbListWidget_->setStyleSheet(
         "QListWidget { border: 1px solid #d1d5db; border-radius: 4px; padding: 4px; } "
-        "QListWidget::item { padding: 4px 8px; } "
+        "QListWidget::item { padding: 6px; margin: 2px 0; } "  // 增加项目内边距和外边距
         "QListWidget::item:hover { background-color: #f3f4f6; } "
         "QListWidget::item:selected { background-color: #3b82f6; color: white; } "
         "QListWidget::item:selected:hover { background-color: #2563eb; color: white; }"
@@ -722,16 +722,17 @@ void MainWindow::updateDbListWidget() {
 
         // 数据库路径标签
         QLabel* label = new QLabel(QDir::toNativeSeparators(dbPath));
-        label->setStyleSheet("font-size: 10pt;");
+        label->setStyleSheet("font-size: 11pt; padding: 2px 0;");
         layout->addWidget(label, 1);
 
         // 删除按钮
         QPushButton* deleteBtn = new QPushButton("删除");
         deleteBtn->setStyleSheet(
-            "QPushButton { padding: 2px 8px; font-size: 9pt; background-color: #ef4444; color: white; border: none; border-radius: 3px; } "
+            "QPushButton { padding: 6px 12px; font-size: 10pt; background-color: #ef4444; color: white; border: none; border-radius: 4px; } "
             "QPushButton:hover { background-color: #dc2626; }"
         );
-        deleteBtn->setMaximumWidth(50);
+        deleteBtn->setMinimumHeight(28);
+        deleteBtn->setMaximumWidth(60);
         connect(deleteBtn, &QPushButton::clicked, this, [this, dbPath]() {
             QMessageBox::StandardButton reply = QMessageBox::question(
                 this,
@@ -756,9 +757,10 @@ void MainWindow::updateDbListWidget() {
         layout->addWidget(deleteBtn);
 
         itemWidget->setLayout(layout);
+        itemWidget->setMinimumHeight(40);  // 增加行高
 
         QListWidgetItem* item = new QListWidgetItem(dbListWidget_);
-        item->setSizeHint(itemWidget->sizeHint());
+        item->setSizeHint(QSize(itemWidget->sizeHint().width(), 40));  // 设置固定行高
         dbListWidget_->addItem(item);
         dbListWidget_->setItemWidget(item, itemWidget);
     }
