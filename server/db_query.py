@@ -229,36 +229,22 @@ def parse_table(output):
 
 
 def compute_receive_number(rows):
-    """生成收文编号: {FILE_CATEGORY}-{YY}-{sequence}
+    """生成收文编号: {FILE_CATEGORY}-{YY}-{CATEGORY_ID}
     YY = 年份后两位 (from FILE_RECEIVE_DATE)
-    sequence = 该类型在该年份的排序 (ordered by FILE_RECEIVE_DATE, then ID)
-    Fallback: 批办单#ID if FILE_CATEGORY is empty
+    CATEGORY_ID = 数据库中存储的真实编号
+    Fallback: 批办单#ID if FILE_CATEGORY or CATEGORY_ID is empty
     """
-    from collections import defaultdict
-
-    # Group records by (category, year) and assign sequence numbers
-    groups = defaultdict(list)
     for r in rows:
         cat = (r.get('FILE_CATEGORY', '') or '').strip()
+        category_id = (r.get('CATEGORY_ID', '') or '').strip()
         date = (r.get('FILE_RECEIVE_DATE', '') or '').strip()
         if date == 'null' or not date:
             date = (r.get('CREATE_TIME', '') or '').strip()
         year = date[:4] if len(date) >= 4 and date[:4].isdigit() else ''
-        if cat and year:
-            groups[(cat, year)].append(r)
 
-    # Sort each group by FILE_RECEIVE_DATE then ID, assign sequence
-    for key, group in groups.items():
-        group.sort(key=lambda r: (
-            r.get('FILE_RECEIVE_DATE', '') or '',
-            r.get('ID', '') or ''
-        ))
-        for i, r in enumerate(group, 1):
-            r['RECEIVE_NUMBER'] = f"{key[0]}-{key[1][2:]}-{i}"
-
-    # Fallback for records without category or date
-    for r in rows:
-        if 'RECEIVE_NUMBER' not in r or not r['RECEIVE_NUMBER']:
+        if cat and year and category_id:
+            r['RECEIVE_NUMBER'] = f"{cat}-{year[2:]}-{category_id}"
+        else:
             rid = r.get('ID', '') or ''
             r['RECEIVE_NUMBER'] = f"批办单#{rid}"
     return rows
