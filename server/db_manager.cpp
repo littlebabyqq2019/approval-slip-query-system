@@ -6,6 +6,9 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QFile>
+#include <QDateTime>
+#include <QThread>
+#include <QAtomicInt>
 #include <QTemporaryDir>
 #include <QJsonDocument>
 #include <QJsonArray>
@@ -28,6 +31,8 @@ DbManager* DbManager::instance() {
 
 DbManager::DbManager(QObject* parent)
     : QObject(parent)
+    , refreshing_(0)
+    , refreshRequested_(0)
 {
 }
 
@@ -186,6 +191,15 @@ bool DbManager::addDatabase(const QString& dbBasePath) {
     return true;
 }
 
+void DbManager::registerDatabasePath(const QString& dbBasePath) {
+    if (dbBasePath.isEmpty()) return;
+    QMutexLocker lock(&mutex_);
+    if (!databasePaths_.contains(dbBasePath)) {
+        databasePaths_.append(dbBasePath);
+        emit databaseListChanged();
+    }
+}
+
 bool DbManager::removeDatabase(const QString& dbBasePath) {
     QMutexLocker lock(&mutex_);
     databasePaths_.removeAll(dbBasePath);
@@ -226,11 +240,73 @@ QString DbManager::getActiveDatabase() const {
     return activeDbPath_;
 }
 
-bool DbManager::refresh() {
+bool DbManager::isRemoteActive() const {
     QMutexLocker lock(&mutex_);
-    if (activeDbPath_.isEmpty()) {
-        return false;
+    return activeDbPath_.startsWith("tcp://");
+}
+
+bool DbManager::isRefreshing() const {
+    return refreshing_.load() != 0;
+}
+
+void DbManager::refreshAsync() {
+    // 已有刷新在跑 → 只置位"再来一次"，由当前 worker 收尾时接着跑，
+    // 避免多个 Python+Java 子进程并发把机器打满。
+    if (refreshing_.load() != 0) {
+        refreshRequested_.store(1);
+        return;
     }
+    refreshing_.store(1);
+    // 用独立线程执行：Web 服务是单线程事件循环，阻塞会卡死所有请求
+    QThread* t = QThread::create([this]() { refreshWorker(); });
+    t->setObjectName("DbRefresh");
+    QObject::connect(t, &QThread::finished, t, &QObject::deleteLater);
+    t->start();
+}
+
+void DbManager::refreshWorker() {
+    // worker 循环：跑完一轮检查是否又来了新请求（期间数据可能又变了）
+    for (;;) {
+        refreshRequested_.store(0);
+        bool ok = refresh();
+        Q_UNUSED(ok);
+        if (refreshRequested_.load() == 0) {
+            break;  // 没有新请求，收工
+        }
+    }
+    refreshing_.store(0);
+    // refresh 成功时已经 emit 过需要通知的地方；这里补一次，
+    // 让 Web 端（靠轮询 /api/files）和 UI 状态都能拿到最新记录数
+    emit databaseChanged();
+}
+
+bool DbManager::requestRefreshIfStale(int maxAgeMs) {
+    {
+        QMutexLocker lock(&mutex_);
+        // 非远程库：本地文件无实时更新需求，不自动刷新
+        if (activeDbPath_.isEmpty() || !activeDbPath_.startsWith("tcp://")) {
+            return false;
+        }
+        qint64 now = QDateTime::currentMSecsSinceEpoch();
+        if (lastRefreshMs_ != 0 && (now - lastRefreshMs_) < maxAgeMs) {
+            return false;  // 数据还新鲜
+        }
+    }
+    refreshAsync();
+    return true;
+}
+
+bool DbManager::refresh() {
+    QString dbPath;
+    {
+        QMutexLocker lock(&mutex_);
+        if (activeDbPath_.isEmpty()) {
+            return false;
+        }
+        dbPath = activeDbPath_;
+    }
+    // 锁外执行：runPythonJson 会启动 Python+Java 子进程（耗时数秒），
+    // 持锁会阻塞 UI 线程和 Web 请求线程对 getAllRecords() 的读取
     QString appDir = findAppDir();
     QString script = appDir + "/db_query.py";
     if (!QFileInfo::exists(script)) {
@@ -243,7 +319,7 @@ bool DbManager::refresh() {
     }
     QString errStr;
     QStringList args;
-    args << script << activeDbPath_ << "list";
+    args << script << dbPath << "list";
     auto result = runPythonJson(args, errStr);
     if (result.isEmpty()) {
         qWarning() << "[DbManager] refresh failed:" << errStr;
@@ -255,7 +331,15 @@ bool DbManager::refresh() {
         emit error("解析数据库记录失败");
         return false;
     }
-    records_ = recs;
+    {
+        QMutexLocker lock(&mutex_);
+        // 刷新期间活动库可能被切换过，丢弃过期结果，避免覆盖新库的数据
+        if (activeDbPath_ != dbPath) {
+            return false;
+        }
+        records_ = recs;
+        lastRefreshMs_ = QDateTime::currentMSecsSinceEpoch();
+    }
     qDebug() << "[DbManager] 载入" << recs.size() << "条记录";
     return true;
 }

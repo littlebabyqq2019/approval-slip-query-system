@@ -6,6 +6,8 @@
 #include <QMap>
 #include <QVariant>
 #include <QMutex>
+#include <QThread>
+#include <atomic>
 
 namespace CrossNetShare {
 
@@ -43,6 +45,8 @@ public:
 
     // 多数据库支持
     bool addDatabase(const QString& dbBasePath);
+    // 仅登记路径到列表（不建连），用于启动时恢复配置：避免启动阶段串行建连远程库导致界面卡死
+    void registerDatabasePath(const QString& dbBasePath);
     bool removeDatabase(const QString& dbBasePath);
     QStringList getDatabaseList() const;
     bool setActiveDatabase(const QString& dbBasePath);
@@ -52,6 +56,22 @@ public:
     bool isDatabaseLoaded() const { return !activeDbPath_.isEmpty(); }
 
     bool refresh();
+
+    // 异步刷新（后台线程执行，立即返回）。用于远程库实时更新：
+    // refresh() 内部要跑 Python+Java 子进程，耗时数秒，
+    // Web 服务是单线程事件循环，同步调用会把整个服务卡住。
+    void refreshAsync();
+
+    // 节流请求刷新：数据超过 maxAgeMs 未刷新时，触发一次后台刷新。
+    // 非阻塞，调用方应立即用 getAllRecords() 返回当前缓存。
+    // 返回 true 表示本次已触发后台刷新。
+    bool requestRefreshIfStale(int maxAgeMs);
+
+    // 当前活动库是否为远程库（tcp:// 前缀）
+    bool isRemoteActive() const;
+
+    // 是否已有后台刷新在执行
+    bool isRefreshing() const;
 
     QList<ApprovalRecord> getAllRecords() const;
     QList<ApprovalRecord> searchRecords(const QString& keyword) const;
@@ -77,6 +97,14 @@ private:
 
     // Multi-database: path → display name
     QStringList databasePaths_;
+
+    // 上次成功刷新时间（毫秒时间戳），用于 refreshIfStale 节流
+    mutable qint64 lastRefreshMs_ = 0;
+
+    // 后台刷新线程控制
+    std::atomic<int> refreshing_{0};       // 0=空闲 1=执行中
+    std::atomic<int> refreshRequested_{0}; // 0=无待处理请求 1=有待处理
+    void refreshWorker();
 
     QString findPython() const;
     QString findAppDir() const;

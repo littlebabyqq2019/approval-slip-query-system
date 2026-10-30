@@ -28,6 +28,7 @@
 #include <QDialogButtonBox>
 #include <QLineEdit>
 #include <QLabel>
+#include <QStandardPaths>
 
 namespace CrossNetShare {
 
@@ -60,8 +61,10 @@ MainWindow::MainWindow(QWidget* parent)
         qDebug() << "[MainWindow] User config file not found:" << userConfigFile;
     }
 
-    // 加载数据库配置
+    // 从配置加载数据库
+    loadingConfig_ = true;
     loadDatabaseConfig();
+    loadingConfig_ = false;
 
     connect(server_, &Server::started, this, &MainWindow::onServerStarted);
     connect(server_, &Server::stopped, this, &MainWindow::onServerStopped);
@@ -594,37 +597,56 @@ void MainWindow::onDbManagerError(const QString& msg) {
 }
 
 void MainWindow::onAutoRefreshDatabase() {
-    // 自动刷新当前活动数据库
-    QString activeDb = DbManager::instance()->getActiveDatabase();
-    if (activeDb.isEmpty()) {
+    // 仅远程数据库需要定时刷新（本地文件库没有实时更新需求）
+    if (!DbManager::instance()->isRemoteActive()) {
         return;
     }
-
-    // 检查是否是远程数据库（以 jdbc: 开头）
-    if (!activeDb.startsWith("jdbc:", Qt::CaseInsensitive)) {
-        return;
-    }
-
-    // 重新加载数据库
-    bool ok = DbManager::instance()->setActiveDatabase(activeDb);
-    if (ok) {
-        int count = DbManager::instance()->getAllRecords().size();
-        dbStatusLabel_->setText(QString("数据库已加载: %1 (共 %2 条记录)").arg(QDir::toNativeSeparators(activeDb)).arg(count));
-        dbStatusLabel_->setStyleSheet("font-size: 9pt; color: #166534; padding: 4px 10px; background-color: #dcfce7; border-radius: 4px;");
-        qDebug() << "[MainWindow] Auto-refreshed database:" << activeDb << "records:" << count;
-    }
+    // 后台线程刷新：同步刷新会跑 Python+Java 子进程（数秒），
+    // 在 UI 线程里做会把窗口卡死
+    DbManager::instance()->refreshAsync();
+    qDebug() << "[MainWindow] Requested background refresh for remote database"
+             << DbManager::instance()->getActiveDatabase();
 }
 
 void MainWindow::onDbDatabaseChanged() {
     int count = DbManager::instance()->getAllRecords().size();
     dbStatusLabel_->setText(QString("数据库已加载，共 %1 条记录").arg(count));
     dbStatusLabel_->setStyleSheet("font-size: 9pt; color: #166534; padding: 4px 10px; background-color: #dcfce7; border-radius: 4px;");
-    appendLog(QString("数据库更新，共 %1 条批办单记录").arg(count));
+    // 后台定时刷新每 30 秒触发一次，只在记录数变化时写日志，避免刷屏
+    static int lastCount = -1;
+    if (count != lastCount) {
+        appendLog(QString("数据库更新，共 %1 条批办单记录").arg(count));
+        lastCount = count;
+    }
     saveDatabaseConfig();
 }
 
+QString MainWindow::databaseConfigFile() const {
+    // 配置文件放在程序目录（发行版部署目录通常可写）。
+    // 若程序目录不可写（如安装在 Program Files），回退到用户 AppData，
+    // 避免写失败导致"重启后数据库列表丢失"。
+    QString appConfig = QCoreApplication::applicationDirPath() + "/config.json";
+    QFileInfo fi(appConfig);
+    QDir appDir(fi.absolutePath());
+    if (appDir.isWritable()) {
+        return appConfig;
+    }
+    QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    if (dataDir.isEmpty()) {
+        dataDir = QDir::homePath() + "/.approval-slip-query-system";
+    }
+    QDir().mkpath(dataDir);
+    return dataDir + "/config.json";
+}
+
 void MainWindow::saveDatabaseConfig() {
-    QString configFile = QCoreApplication::applicationDirPath() + "/config.json";
+    // 启动恢复配置期间禁止写盘：此时列表还没恢复完整，
+    // 写下去会把剩下未恢复的数据库从 config.json 里抹掉（重启后只剩第一个库的原因）
+    if (loadingConfig_) {
+        qDebug() << "[MainWindow] Skip saving config while loading";
+        return;
+    }
+    QString configFile = databaseConfigFile();
     QJsonObject root;
     root["activeDatabase"] = DbManager::instance()->getActiveDatabase();
     QJsonArray dbArray;
@@ -633,19 +655,34 @@ void MainWindow::saveDatabaseConfig() {
     }
     root["databases"] = dbArray;
     QJsonDocument doc(root);
-    QFile f(configFile);
-    if (f.open(QIODevice::WriteOnly)) {
-        f.write(doc.toJson());
-        f.close();
-        qDebug() << "[MainWindow] Saved database config:" << configFile;
+
+    // 原子写：先写临时文件再替换，避免断电/崩溃留下半截 JSON 导致配置全丢
+    QString tmpFile = configFile + ".tmp";
+    QFile f(tmpFile);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        qWarning() << "[MainWindow] Cannot write config:" << tmpFile << f.errorString();
+        appendLog("[配置] 无法写入配置文件: " + tmpFile + " (" + f.errorString() + ")");
+        return;
     }
+    f.write(doc.toJson());
+    f.flush();
+    f.close();
+    QFile::remove(configFile);
+    if (!QFile::rename(tmpFile, configFile)) {
+        qWarning() << "[MainWindow] Cannot rename config to:" << configFile;
+        appendLog("[配置] 配置保存失败: " + configFile);
+        return;
+    }
+    qDebug() << "[MainWindow] Saved database config:" << configFile
+             << "dbs:" << DbManager::instance()->getDatabaseList().size();
 }
 
 void MainWindow::loadDatabaseConfig() {
-    QString configFile = QCoreApplication::applicationDirPath() + "/config.json";
+    QString configFile = databaseConfigFile();
     QFile f(configFile);
     if (!f.open(QIODevice::ReadOnly)) {
         qDebug() << "[MainWindow] No database config found:" << configFile;
+        appendLog("[配置] 未找到配置文件: " + configFile);
         return;
     }
     QJsonParseError err;
@@ -653,20 +690,38 @@ void MainWindow::loadDatabaseConfig() {
     f.close();
     if (doc.isNull() || !doc.isObject()) {
         qDebug() << "[MainWindow] Invalid database config:" << err.errorString();
+        appendLog("[配置] 配置文件损坏: " + err.errorString());
         return;
     }
     QJsonObject root = doc.object();
     QJsonArray dbArray = root.value("databases").toArray();
     QString activeDb = root.value("activeDatabase").toString();
+
+    int loadedCount = 0;
+    int skippedCount = 0;
     for (const QJsonValue& v : dbArray) {
         QString dbPath = v.toString();
-        if (dbPath.startsWith("tcp://") ||
-            QFileInfo::exists(dbPath + ".mv.db") ||
-            QFileInfo::exists(dbPath + ".db")) {
-            DbManager::instance()->addDatabase(dbPath);
-            qDebug() << "[MainWindow] Loaded database from config:" << dbPath;
+        if (dbPath.isEmpty()) continue;
+
+        bool isRemote = dbPath.startsWith("tcp://");
+        bool fileExists = QFileInfo::exists(dbPath + ".mv.db") ||
+                          QFileInfo::exists(dbPath + ".db");
+        if (isRemote || fileExists) {
+            // 注意：加载配置阶段只登记到列表，不逐库建连。
+            // 远程库建连要跑 Python+Java（每个数秒），启动时全部连接会卡死界面；
+            // 只对最终的活动库做一次连接。
+            DbManager::instance()->registerDatabasePath(dbPath);
+            loadedCount++;
+            qDebug() << "[MainWindow] Restored database from config:" << dbPath;
+        } else {
+            skippedCount++;
+            qDebug() << "[MainWindow] Skip missing database:" << dbPath;
+            appendLog("[配置] 跳过失效数据库（文件不存在）: " + dbPath);
         }
     }
+    appendLog(QString("[配置] 从 %1 恢复 %2 个数据库（跳过 %3 个）")
+              .arg(configFile).arg(loadedCount).arg(skippedCount));
+
     if (!activeDb.isEmpty() && DbManager::instance()->getDatabaseList().contains(activeDb)) {
         DbManager::instance()->setActiveDatabase(activeDb);
         dbPathLineEdit_->setText(QDir::toNativeSeparators(activeDb));

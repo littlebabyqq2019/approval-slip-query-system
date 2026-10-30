@@ -425,9 +425,24 @@ void WebServer::handleDatabaseList(QTcpSocket* socket, const HttpRequest& reques
     root["databases"] = nlohmann::json::array();
     for (const QString& db : dbs) {
         nlohmann::json item;
-        QFileInfo fi(db + ".mv.db");
+        QString name;
+        if (db.startsWith("tcp://")) {
+            // 远程库：取 tcp://host:port/path 的 path 最后一段作为显示名，
+            // 避免把整条连接串（含账号密码）暴露在前端下拉框里
+            int slash = db.lastIndexOf('/');
+            if (slash >= 0 && slash + 1 < db.length()) {
+                name = db.mid(slash + 1);
+            }
+            if (name.isEmpty()) {
+                int at = db.indexOf('@');
+                name = (at >= 0) ? db.mid(at + 1) : db.mid(6);
+            }
+        } else {
+            name = QFileInfo(db).fileName();
+        }
         item["path"] = db.toStdString();
-        item["name"] = fi.fileName().toStdString();
+        item["name"] = name.toStdString();
+        item["remote"] = db.startsWith("tcp://");
         item["active"] = (db == active);
         root["databases"].push_back(item);
     }
@@ -488,6 +503,11 @@ void WebServer::handleFileList(QTcpSocket* socket, const HttpRequest& request) {
 
     // ===== 批办单模式：如果数据库已加载，从数据库读取记录 =====
     if (DbManager::instance()->isDatabaseLoaded()) {
+        // 远程数据库是实时更新的：数据超过 5 秒未刷新就在后台线程刷新一次。
+        // 非阻塞——本次请求立即返回当前缓存，下一次轮询（前端每 3 秒一次）
+        // 就能拿到新数据，不会把 Web 事件循环卡在 Python+Java 子进程上。
+        DbManager::instance()->requestRefreshIfStale(5000);
+
         QList<ApprovalRecord> records = DbManager::instance()->getAllRecords();
         nlohmann::json root;
         root["success"] = true;

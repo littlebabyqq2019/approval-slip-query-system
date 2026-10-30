@@ -58,6 +58,7 @@ private:
     void updateServerStatus();
     void appendLog(const QString& message);
     void updateDbListWidget();
+    QString databaseConfigFile() const;  // 配置文件路径：优先程序目录（可写时），否则用户 AppData
 
     Server* server_;
     WatermarkService* watermarkService_;
@@ -80,6 +81,10 @@ private:
     // 系统托盘
     QSystemTrayIcon* trayIcon_;
     QMenu* trayMenu_;
+
+    // 启动恢复配置期间为 true：此时不写 config.json，
+    // 否则 addDatabase() 内部触发的 databaseChanged 会用"只加了一半"的列表覆盖配置文件
+    bool loadingConfig_ = false;
 };
 
 }
