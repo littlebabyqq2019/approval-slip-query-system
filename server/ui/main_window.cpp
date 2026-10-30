@@ -29,6 +29,9 @@
 #include <QLineEdit>
 #include <QLabel>
 #include <QStandardPaths>
+#include <QFile>
+#include <QDir>
+#include <QFileInfo>
 
 namespace CrossNetShare {
 
@@ -626,9 +629,17 @@ QString MainWindow::databaseConfigFile() const {
     // 若程序目录不可写（如安装在 Program Files），回退到用户 AppData，
     // 避免写失败导致"重启后数据库列表丢失"。
     QString appConfig = QCoreApplication::applicationDirPath() + "/config.json";
-    QFileInfo fi(appConfig);
-    QDir appDir(fi.absolutePath());
-    if (appDir.isWritable()) {
+    // 用"试写探针"检测程序目录可写性：QFileInfo/QDir 的 isWritable() 基于
+    // 文件属性位，不反映 ACL（Program Files 目录没有只读属性但用户实际不可写），
+    // 且 QDir::isWritable() 在本项目使用的 Qt 5.15 中不存在（MSVC 编译报 C2039）。
+    QFile probe(QCoreApplication::applicationDirPath() + "/.write_probe");
+    bool appDirWritable = false;
+    if (probe.open(QIODevice::WriteOnly)) {
+        probe.close();
+        probe.remove();
+        appDirWritable = true;
+    }
+    if (appDirWritable) {
         return appConfig;
     }
     QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);

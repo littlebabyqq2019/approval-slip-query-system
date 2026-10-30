@@ -8,7 +8,6 @@
 #include <QFile>
 #include <QDateTime>
 #include <QThread>
-#include <QAtomicInt>
 #include <QTemporaryDir>
 #include <QJsonDocument>
 #include <QJsonArray>
