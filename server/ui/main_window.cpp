@@ -620,8 +620,9 @@ void MainWindow::onDbDatabaseChanged() {
     if (count != lastCount) {
         appendLog(QString("数据库更新，共 %1 条批办单记录").arg(count));
         lastCount = count;
+        // 记录数变化才保存：避免远程库每 30 秒刷新一次都写一次磁盘
+        saveDatabaseConfig();
     }
-    saveDatabaseConfig();
 }
 
 QString MainWindow::databaseConfigFile() const {
@@ -667,8 +668,17 @@ void MainWindow::saveDatabaseConfig() {
     root["databases"] = dbArray;
     QJsonDocument doc(root);
 
-    // 原子写：先写临时文件再替换，避免断电/崩溃留下半截 JSON 导致配置全丢
-    QString tmpFile = configFile + ".tmp";
+    // 原子写策略：
+    //   写 config.json.new → rename new→main
+    //   rename 成功后删掉旧的 .bak（如果有）
+    // 注意：不能先删 config.json 再 rename .tmp，
+    // 因为这两步之间断电会导致 config.json 已消失但 .tmp 还没就位。
+    // QFile::rename 在目标文件已存在时：
+    //   Windows: 失败（需要先删目标），Linux/macOS: 原子替换
+    // 兼容方案：rename → .bak 先备份，再 rename .new → main
+    QString tmpFile  = configFile + ".new";
+    QString bakFile  = configFile + ".bak";
+
     QFile f(tmpFile);
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         qWarning() << "[MainWindow] Cannot write config:" << tmpFile << f.errorString();
@@ -678,18 +688,37 @@ void MainWindow::saveDatabaseConfig() {
     f.write(doc.toJson());
     f.flush();
     f.close();
-    QFile::remove(configFile);
+
+    // 步骤1：把当前 config.json 备份为 .bak（Windows rename 不允许目标存在，先删旧 .bak）
+    QFile::remove(bakFile);
+    QFile::rename(configFile, bakFile);   // 如果 config.json 不存在，这步静默失败，没关系
+
+    // 步骤2：把 .new 正式命名为 config.json
     if (!QFile::rename(tmpFile, configFile)) {
+        // 上一步 .new → config.json 失败：尝试把 .bak 还原
+        QFile::rename(bakFile, configFile);
         qWarning() << "[MainWindow] Cannot rename config to:" << configFile;
-        appendLog("[配置] 配置保存失败: " + configFile);
+        appendLog("[配置] 配置保存失败，已还原备份: " + configFile);
         return;
     }
+
+    // 步骤3：写入成功，删掉 .bak（下次加载时若发现 .bak 仍存在说明上次写入被中断，
+    //         可在 loadDatabaseConfig 里用 .bak 恢复；此处正常流程删掉即可）
+    QFile::remove(bakFile);
     qDebug() << "[MainWindow] Saved database config:" << configFile
              << "dbs:" << DbManager::instance()->getDatabaseList().size();
 }
 
 void MainWindow::loadDatabaseConfig() {
     QString configFile = databaseConfigFile();
+    QString bakFile    = configFile + ".bak";
+
+    // 如果主文件不存在但 .bak 存在，说明上次写入被中断（断电等），用 .bak 恢复
+    if (!QFile::exists(configFile) && QFile::exists(bakFile)) {
+        appendLog("[配置] 主配置文件缺失，从备份恢复: " + bakFile);
+        QFile::rename(bakFile, configFile);
+    }
+
     QFile f(configFile);
     if (!f.open(QIODevice::ReadOnly)) {
         qDebug() << "[MainWindow] No database config found:" << configFile;
